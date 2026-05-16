@@ -70,6 +70,6 @@ export function getStoragePaths() {
   return {
     userData: app.getPath('userData'),
     workspace: path.join(app.getPath('userData'), 'workspace'),
-    db: path.join(app.getPath('userData'), 'queue.sqlite')
+    db: path.join(app.getPath('userData'), 'queue.json')
   }
 }

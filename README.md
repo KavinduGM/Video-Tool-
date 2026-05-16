@@ -19,11 +19,12 @@ You need **Node.js 20+** on the machine that runs the app (for `npx hyperframes`
 ```bash
 # from the project root
 npm install
-npm run rebuild        # rebuilds better-sqlite3 against the Electron ABI
 
 # install the Hyperframes skill once (creates the global hyperframes CLI)
 npx skills add heygen-com/hyperframes
 ```
+
+The project has **no native modules** — no C++ compiler, no Visual Studio, no Python toolchain needed. Just Node.
 
 Then either:
 
@@ -127,7 +128,7 @@ When all scenes are rendered, ffmpeg's `xfade` and `acrossfade` filters glue the
 | Item | Location |
 |---|---|
 | Settings + voice profiles | `<userData>/ai-video-creator.json` |
-| Queue database | `<userData>/queue.sqlite` |
+| Queue database | `<userData>/queue.json` |
 | Per-job working files (scene HTML, audio, intermediate MP4s) | `<userData>/workspace/<job-id>/` |
 
 `<userData>` on Windows is `%APPDATA%/AI Video Creator/`, on macOS `~/Library/Application Support/AI Video Creator/`.
@@ -151,7 +152,7 @@ Workspace folders are kept after a job finishes — handy for debugging, deletab
 src/
   main/              Electron main process
     pipeline/        parser.ts, tts.ts, claude.ts, hyperframes.ts, ffmpeg.ts, runner.ts
-    db.ts            SQLite-backed persistent queue
+    db.ts            JSON-file persistent queue (no native deps)
     settings.ts      electron-store wrapper
     worker.ts        single-flight job dispatcher
     ipc.ts           IPC channel handlers

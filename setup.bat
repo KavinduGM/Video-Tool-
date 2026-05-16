@@ -10,9 +10,10 @@ echo ============================================================
 echo.
 echo This will:
 echo   1. Make sure Node.js is installed (uses winget if missing).
-echo   2. Install npm dependencies.
-echo   3. Rebuild native modules for Electron.
-echo   4. Install the HeyGen Hyperframes CLI skill.
+echo   2. Install npm dependencies (with network retry).
+echo   3. Install the HeyGen Hyperframes CLI skill.
+echo.
+echo No C++ compiler is needed - this build has no native modules.
 echo.
 echo Working folder: %CD%
 echo.
@@ -22,7 +23,7 @@ REM ------------------------------------------------------------
 REM 1. Node.js check
 REM ------------------------------------------------------------
 echo.
-echo [1/4] Checking for Node.js...
+echo [1/3] Checking for Node.js...
 where node >nul 2>nul
 if errorlevel 1 (
     echo   Node.js NOT found.
@@ -47,8 +48,8 @@ if errorlevel 1 (
         exit /b 1
     )
     echo.
-    echo   Node.js installed. You may need to CLOSE this window and re-run
-    echo   setup.bat so the new PATH is picked up.
+    echo   Node.js installed. CLOSE this window and re-run setup.bat so the
+    echo   new PATH is picked up.
     echo.
     pause
     exit /b 0
@@ -65,39 +66,46 @@ if errorlevel 1 (
 )
 
 REM ------------------------------------------------------------
-REM 2. npm install
+REM 2. npm install (with retry, longer fetch timeout)
 REM ------------------------------------------------------------
 echo.
-echo [2/4] Installing npm dependencies (this can take a few minutes)...
-call npm install
+echo [2/3] Installing npm dependencies (this can take a few minutes)...
+echo   Setting npm fetch-timeout to 5 minutes to ride out slow networks.
+
+call npm config set fetch-timeout 300000
+call npm config set fetch-retries 5
+call npm config set fetch-retry-mintimeout 20000
+call npm config set fetch-retry-maxtimeout 120000
+
+set ATTEMPT=0
+:NPM_INSTALL_RETRY
+set /a ATTEMPT=ATTEMPT+1
+echo   Attempt !ATTEMPT! of 3...
+call npm install --no-fund --no-audit
 if errorlevel 1 (
+    if !ATTEMPT! lss 3 (
+        echo.
+        echo   npm install failed - retrying in 5 seconds...
+        timeout /t 5 /nobreak >nul
+        goto NPM_INSTALL_RETRY
+    )
     echo.
-    echo   npm install FAILED. Scroll up to see why.
-    echo   Common cause: missing Microsoft C++ Build Tools - install from
-    echo   https://visualstudio.microsoft.com/visual-cpp-build-tools/ and retry.
+    echo   npm install FAILED after 3 attempts.
+    echo.
+    echo   If you see "ETIMEDOUT" or "ECONNRESET" - it's a network issue.
+    echo     Check your internet connection, disable VPN/proxy, and retry.
+    echo.
+    echo   If you see anything else, scroll up and read the actual error.
+    echo.
     pause
     exit /b 1
 )
 
 REM ------------------------------------------------------------
-REM 3. Rebuild native modules
+REM 3. Hyperframes skill
 REM ------------------------------------------------------------
 echo.
-echo [3/4] Rebuilding native modules for Electron...
-call npm run rebuild
-if errorlevel 1 (
-    echo.
-    echo   Native rebuild FAILED. better-sqlite3 may not load.
-    echo   You can still try running start.bat - if it crashes, install
-    echo   Microsoft C++ Build Tools and re-run setup.bat.
-    pause
-)
-
-REM ------------------------------------------------------------
-REM 4. Hyperframes skill
-REM ------------------------------------------------------------
-echo.
-echo [4/4] Installing HeyGen Hyperframes CLI skill...
+echo [3/3] Installing HeyGen Hyperframes CLI skill...
 call npx --yes skills add heygen-com/hyperframes
 if errorlevel 1 (
     echo.

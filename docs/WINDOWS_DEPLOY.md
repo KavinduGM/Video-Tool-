@@ -120,13 +120,7 @@ cd heygen_video_tool
 npm install
 ```
 
-The `postinstall` step calls `electron-builder install-app-deps`, which automatically rebuilds native modules (better-sqlite3) against the Electron ABI. If that's skipped or fails, run it explicitly:
-
-```powershell
-npm run rebuild
-```
-
-If `node-gyp` errors mention missing build tools, install Microsoft's **Build Tools for Visual Studio 2022** (Desktop C++ workload) from <https://visualstudio.microsoft.com/visual-cpp-build-tools/>, restart the shell, and re-run `npm run rebuild`.
+The project has **no native modules** — no Visual Studio, no Python, no node-gyp needed. `npm install` only downloads JS packages and the pre-built `ffmpeg.exe` / `ffprobe.exe` binaries. If the install fails it's almost always a network timeout — re-run it.
 
 ### 3.3 Run in dev mode
 
@@ -208,7 +202,7 @@ In **New job**, click **Pick file(s) and queue**, select multiple `.yml` files (
 |---|---|
 | App binary (Option A) | `%LOCALAPPDATA%\Programs\AI Video Creator\AI Video Creator.exe` |
 | Settings + voice profiles | `%APPDATA%\AI Video Creator\ai-video-creator.json` |
-| Job queue database | `%APPDATA%\AI Video Creator\queue.sqlite` |
+| Job queue database | `%APPDATA%\AI Video Creator\queue.json` |
 | Per-job intermediate files (HTML, audio, scene MP4s) | `%APPDATA%\AI Video Creator\workspace\<job-id>\` |
 | Final MP4 output | whatever `output_folder` you set in the script |
 | Source clone (Option B) | wherever you ran `git clone`, e.g. `C:\dev\heygen_video_tool\` |
@@ -249,11 +243,8 @@ The voice server is still loading its XTTS model. Wait 30–60 s and click *Test
 **Job stuck on "Scene N: rendering with Hyperframes"**
 Open **Details** on the job — the live `hyperframes:` log lines tell you exactly what the renderer is doing. Long renders (30+ s of high-resolution video) can take several minutes on a CPU-only PC. A discrete GPU helps a lot for the headless-Chromium pass.
 
-**better-sqlite3 native module errors after a Node upgrade**
-```powershell
-npm run rebuild
-```
-rebuilds it against the current Electron ABI.
+**`npm install` keeps failing with `ETIMEDOUT` / `ECONNRESET`**
+Network is flaky. `setup.bat` retries 3× with a long timeout already; if it still fails, disable VPN/proxy, try a different network, or run `npm install` manually in PowerShell — it picks up where it left off.
 
 **Antivirus blocks `ffmpeg.exe` or the bundled Chromium**
 Add the install folder to your antivirus exclusion list (see section 1.4). Some corporate AVs quarantine unsigned binaries silently — check the quarantine log.

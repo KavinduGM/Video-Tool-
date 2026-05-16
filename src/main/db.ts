@@ -1,58 +1,87 @@
-import Database from 'better-sqlite3'
+// Pure-JS, file-backed persistent job queue. No native modules.
+//
+// All jobs live in memory; every mutation persists the full array to disk
+// with an atomic write-then-rename so we never corrupt the file on crash.
+// Single-process / single-writer (the Electron main process), so we don't
+// need a mutex — JS is single-threaded and every public function here is
+// synchronous between read and write.
+
 import fs from 'node:fs'
-import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Job, JobLogEntry, JobStatus } from '@shared/types'
 import { getStoragePaths } from './settings'
 
-let db: Database.Database | null = null
-
-function getDb(): Database.Database {
-  if (!db) {
-    const { db: dbPath, workspace } = getStoragePaths()
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true })
-    fs.mkdirSync(workspace, { recursive: true })
-    db = new Database(dbPath)
-    db.pragma('journal_mode = WAL')
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS jobs (
-        id TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        script_yaml TEXT NOT NULL,
-        script_path TEXT,
-        video_name TEXT NOT NULL,
-        output_path TEXT,
-        error TEXT,
-        progress REAL NOT NULL DEFAULT 0,
-        current_step TEXT,
-        logs TEXT NOT NULL DEFAULT '[]'
-      );
-      CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-      CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);
-    `)
-    // If app crashed mid-run, reset running jobs back to queued on boot.
-    db.prepare(`UPDATE jobs SET status='queued', current_step=NULL, progress=0 WHERE status='running'`).run()
-  }
-  return db
+interface DbShape {
+  version: 1
+  jobs: Job[]
 }
 
-function rowToJob(row: any): Job {
-  return {
-    id: row.id,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    status: row.status as JobStatus,
-    script_yaml: row.script_yaml,
-    script_path: row.script_path ?? undefined,
-    video_name: row.video_name,
-    output_path: row.output_path ?? undefined,
-    error: row.error ?? undefined,
-    progress: row.progress,
-    current_step: row.current_step ?? undefined,
-    logs: JSON.parse(row.logs ?? '[]') as JobLogEntry[]
+let cache: DbShape | null = null
+let dbPath: string | null = null
+
+function init(): DbShape {
+  if (cache) return cache
+  const paths = getStoragePaths()
+  fs.mkdirSync(paths.userData, { recursive: true })
+  fs.mkdirSync(paths.workspace, { recursive: true })
+  dbPath = paths.db
+
+  if (fs.existsSync(dbPath)) {
+    try {
+      const raw = fs.readFileSync(dbPath, 'utf8')
+      const parsed = JSON.parse(raw) as DbShape
+      if (parsed && parsed.version === 1 && Array.isArray(parsed.jobs)) {
+        cache = parsed
+      } else {
+        cache = { version: 1, jobs: [] }
+      }
+    } catch {
+      // Corrupt JSON — back it up and start fresh rather than losing the app.
+      try {
+        fs.renameSync(dbPath, `${dbPath}.corrupt-${Date.now()}`)
+      } catch {
+        // ignore
+      }
+      cache = { version: 1, jobs: [] }
+    }
+  } else {
+    cache = { version: 1, jobs: [] }
   }
+
+  // Recover from a crash: anything that was 'running' goes back to 'queued'.
+  let dirty = false
+  for (const j of cache.jobs) {
+    if (j.status === 'running') {
+      j.status = 'queued'
+      j.current_step = undefined
+      j.progress = 0
+      dirty = true
+    }
+  }
+  if (dirty) persist()
+  return cache
+}
+
+function persist(): void {
+  if (!cache || !dbPath) return
+  const tmp = `${dbPath}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(cache, null, 2), 'utf8')
+  // fs.renameSync is atomic on the same volume on both Windows and POSIX,
+  // but Windows fails if the dest exists. Use renameSync after unlink as fallback.
+  try {
+    fs.renameSync(tmp, dbPath)
+  } catch {
+    try {
+      fs.unlinkSync(dbPath)
+    } catch {
+      // ignore
+    }
+    fs.renameSync(tmp, dbPath)
+  }
+}
+
+function deepClone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v)) as T
 }
 
 export function createJob(input: {
@@ -60,6 +89,7 @@ export function createJob(input: {
   script_yaml: string
   script_path?: string
 }): Job {
+  const db = init()
   const now = Date.now()
   const job: Job = {
     id: randomUUID(),
@@ -72,70 +102,67 @@ export function createJob(input: {
     progress: 0,
     logs: []
   }
-  getDb()
-    .prepare(
-      `INSERT INTO jobs (id, created_at, updated_at, status, script_yaml, script_path, video_name, progress, logs)
-       VALUES (@id, @created_at, @updated_at, @status, @script_yaml, @script_path, @video_name, @progress, @logs)`
-    )
-    .run({
-      ...job,
-      script_path: job.script_path ?? null,
-      logs: JSON.stringify(job.logs)
-    })
-  return job
+  db.jobs.push(job)
+  persist()
+  return deepClone(job)
 }
 
 export function listJobs(): Job[] {
-  const rows = getDb().prepare(`SELECT * FROM jobs ORDER BY created_at DESC`).all()
-  return rows.map(rowToJob)
+  const db = init()
+  return db.jobs
+    .slice()
+    .sort((a, b) => b.created_at - a.created_at)
+    .map((j) => deepClone(j))
 }
 
 export function getJob(id: string): Job | null {
-  const row = getDb().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id)
-  return row ? rowToJob(row) : null
+  const db = init()
+  const j = db.jobs.find((x) => x.id === id)
+  return j ? deepClone(j) : null
 }
 
 export function nextQueuedJob(): Job | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`)
-    .get()
-  return row ? rowToJob(row) : null
+  const db = init()
+  const queued = db.jobs
+    .filter((j) => j.status === 'queued')
+    .sort((a, b) => a.created_at - b.created_at)
+  return queued[0] ? deepClone(queued[0]) : null
 }
 
 export function updateJob(
   id: string,
   patch: Partial<Pick<Job, 'status' | 'progress' | 'current_step' | 'error' | 'output_path'>>
 ): Job | null {
-  const existing = getJob(id)
-  if (!existing) return null
-  const next: Job = { ...existing, ...patch, updated_at: Date.now() }
-  getDb()
-    .prepare(
-      `UPDATE jobs SET status=@status, progress=@progress, current_step=@current_step,
-       error=@error, output_path=@output_path, updated_at=@updated_at WHERE id=@id`
-    )
-    .run({
-      id: next.id,
-      status: next.status,
-      progress: next.progress,
-      current_step: next.current_step ?? null,
-      error: next.error ?? null,
-      output_path: next.output_path ?? null,
-      updated_at: next.updated_at
-    })
-  return next
+  const db = init()
+  const idx = db.jobs.findIndex((j) => j.id === id)
+  if (idx < 0) return null
+  const existing = db.jobs[idx]
+  const next: Job = {
+    ...existing,
+    ...patch,
+    updated_at: Date.now()
+  }
+  db.jobs[idx] = next
+  persist()
+  return deepClone(next)
 }
 
 export function appendLog(id: string, entry: JobLogEntry): Job | null {
-  const job = getJob(id)
-  if (!job) return null
-  const nextLogs = [...job.logs, entry].slice(-500)
-  getDb().prepare(`UPDATE jobs SET logs=?, updated_at=? WHERE id=?`).run(JSON.stringify(nextLogs), Date.now(), id)
-  return getJob(id)
+  const db = init()
+  const idx = db.jobs.findIndex((j) => j.id === id)
+  if (idx < 0) return null
+  const j = db.jobs[idx]
+  j.logs = [...j.logs, entry].slice(-500)
+  j.updated_at = Date.now()
+  persist()
+  return deepClone(j)
 }
 
 export function deleteJob(id: string): void {
-  getDb().prepare(`DELETE FROM jobs WHERE id=?`).run(id)
+  const db = init()
+  const before = db.jobs.length
+  db.jobs = db.jobs.filter((j) => j.id !== id)
+  if (db.jobs.length !== before) persist()
 }
 
 export function resetJob(id: string): Job | null {
