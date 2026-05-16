@@ -158,7 +158,7 @@ export async function concatScenesWithTransitions(
   let prevDur = scenes[0].durationSeconds
 
   for (let i = 1; i < scenes.length; i++) {
-    const trans = scenes[i - 1].transition_out
+    const trans = scenes[i - 1].transitionOut
     const xfadeName = mapTransitionToXfade(trans.type)
     const dur = trans.type === 'none' || !xfadeName ? 0 : Math.min(trans.duration, scenes[i].durationSeconds, prevDur)
 
