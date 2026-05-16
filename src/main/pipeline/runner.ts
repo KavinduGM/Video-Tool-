@@ -52,6 +52,11 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
   // Roughly: 60% scenes (split equally), 30% concat, 10% finalize.
   const sceneShare = 0.6 / totalScenes
 
+  // Each scene gets a 1-second tail: the final video frame is held still
+  // and the audio is padded with silence. Gives every scene a clean breath
+  // before the next one begins (and a clean ending on the very last one).
+  const SCENE_TAIL_SECONDS = 1.0
+
   for (let i = 0; i < spec.scenes.length; i++) {
     if (handle.cancelled) throw new Error('Cancelled')
     const scene = spec.scenes[i]
@@ -131,17 +136,26 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       cb.onLog(info(`Scene ${i + 1}: could not probe render duration — ${err.message}`))
     }
 
-    cb.onProgress(baseProgress + sceneShare * 0.8, `Scene ${i + 1}/${totalScenes}: muxing audio`)
+    cb.onProgress(baseProgress + sceneShare * 0.8, `Scene ${i + 1}/${totalScenes}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
     const finalMp4 = path.join(sceneDir, 'scene.mp4')
     await muxAudioWithVideo(
-      { videoIn: rawMp4, audioIn: audioPath, out: finalMp4, durationSeconds: audioDuration },
+      {
+        videoIn: rawMp4,
+        audioIn: audioPath,
+        out: finalMp4,
+        durationSeconds: audioDuration,
+        tailHoldSeconds: SCENE_TAIL_SECONDS
+      },
       (line) => cb.onLog(info(`ffmpeg: ${line}`))
     )
-    cb.onLog(info(`✓ Scene ${i + 1}/${totalScenes} saved to ${finalMp4}`))
+    const sceneTotalSeconds = audioDuration + SCENE_TAIL_SECONDS
+    cb.onLog(info(
+      `✓ Scene ${i + 1}/${totalScenes} saved (${audioDuration.toFixed(2)}s audio + ${SCENE_TAIL_SECONDS.toFixed(1)}s held-frame tail = ${sceneTotalSeconds.toFixed(2)}s) → ${finalMp4}`
+    ))
 
     sceneResults.push({
       finalMp4,
-      durationSeconds: audioDuration,
+      durationSeconds: sceneTotalSeconds,
       transition_out: scene.transition_out
     })
   }

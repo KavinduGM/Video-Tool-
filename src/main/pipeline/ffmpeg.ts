@@ -66,24 +66,65 @@ export interface MuxArgs {
   audioIn: string
   out: string
   durationSeconds: number
+  /**
+   * Optional. Additional time appended to the end of the muxed scene where
+   * the LAST video frame is held still and the audio track is padded with
+   * silence. Used to give each scene a clean breath before the next one
+   * begins. 0 = no tail.
+   */
+  tailHoldSeconds?: number
 }
 
 export async function muxAudioWithVideo(args: MuxArgs, onLog?: (l: string) => void): Promise<void> {
-  // Force the output to exactly the audio's duration so timelines stay aligned.
+  const tail = Math.max(0, args.tailHoldSeconds ?? 0)
+  const totalDuration = args.durationSeconds + tail
+
+  // Without a tail, keep the simple stream-mapping path (fast, well-tested).
+  if (tail === 0) {
+    await runFfmpeg(
+      [
+        '-y',
+        '-i', args.videoIn,
+        '-i', args.audioIn,
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'medium',
+        '-crf', '20',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-t', totalDuration.toFixed(3),
+        args.out
+      ],
+      onLog
+    )
+    return
+  }
+
+  // With a tail: use filter_complex to (a) clone-pad the video by `tail`
+  // seconds at the end (freezing the last frame) and (b) silence-pad the
+  // audio by the same amount.
+  const t = tail.toFixed(3)
+  const filterComplex =
+    `[0:v]tpad=stop_mode=clone:stop_duration=${t}[v];` +
+    `[1:a]apad=pad_dur=${t}[a]`
+
   await runFfmpeg(
     [
       '-y',
       '-i', args.videoIn,
       '-i', args.audioIn,
+      '-filter_complex', filterComplex,
+      '-map', '[v]',
+      '-map', '[a]',
       '-c:v', 'libx264',
       '-pix_fmt', 'yuv420p',
       '-preset', 'medium',
       '-crf', '20',
       '-c:a', 'aac',
       '-b:a', '192k',
-      '-map', '0:v:0',
-      '-map', '1:a:0',
-      '-t', args.durationSeconds.toFixed(3),
+      '-t', totalDuration.toFixed(3),
       args.out
     ],
     onLog
