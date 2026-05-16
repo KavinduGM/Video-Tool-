@@ -72,24 +72,49 @@ Hard requirements you MUST follow:
      drift) lasting exactly until D seconds, to keep the frame alive — but it must NOT repeat
      and must NOT distract from the final composition.
 
-5b. STEP / BEAT TIMESTAMPS IN THE EXPLAINER ARE A MANDATORY CONTRACT.
-    If the user's explainer contains lines like \`Step 1 (0.0 – 1.6s):\`, \`Beat 3 (2.4 – 4.0s):\`,
-    \`at 5.5s: …\`, or any other explicit time markers, you MUST:
-    - Honor each timestamp EXACTLY. The element described in Step 3 at 2.4s remains hidden
-      before 2.4s and begins its reveal animation at exactly t = 2.4s.
-    - Place every step in the timeline at its declared time, even if it means the early steps
-      finish quickly and the later steps have to wait.
-    - Do NOT condense the steps into the first few seconds and then leave the rest of the
-      timeline empty. That is the most common failure mode and produces a video that looks
-      like it loops or freezes.
-    - Critically: every element's INITIAL CSS state must be the pre-reveal state (opacity: 0,
-      or stroke-dashoffset = path length, or off-screen transform). Otherwise the element
-      shows at frame 0 and your "reveal" is a no-op.
+5b. ONE DOM ELEMENT PER VISIBLE ITEM. ONE ANIMATION PER ELEMENT.
+    This is the single biggest source of "the scene loops" failures.
+
+    The explainer lists STEPS. A step often describes MULTIPLE visible items.
+    Examples:
+      "Step 8: three white bullets write in one after another:
+                'Identifies the disease'
+                'Looks at the PRESENT'
+                'e.g. Stage 3 Lung Cancer'"
+      → That is THREE separate DOM elements with THREE separate, staggered animations,
+        not one element containing all three lines, and not three elements that animate
+        at the same time.
+
+      "Step 6: a hand-drawn box strokes in, then sky-blue text writes in, then a
+                phrase writes in beside it"
+      → That is THREE separate animations on three separate elements: the box's
+        stroke-dashoffset reveal, then the text write-on, then the phrase write-on.
+
+    PLANNING CHECKLIST you must satisfy before writing HTML:
+    (a) Count every distinct visible item described across all steps (boxes, lines, labels,
+        bullets, sub-bullets, doodles, headings, underlines). Call this N.
+    (b) You will create N DOM elements, each with its own animation and its own
+        start-time / delay.
+    (c) Distribute those N animation start times across the full duration D so that:
+          - The FIRST animation starts at or near t = 0.
+          - The LAST animation starts no earlier than t = D − 2.0 seconds.
+          - No gap longer than 1.5 seconds between consecutive animation start times
+            during the first 90% of the timeline.
+    (d) Within a step that lists "one after another" items, stagger them — never reveal
+      them simultaneously.
+
+    If timestamps appear in the explainer (Step N (a–b s):), honor them as a hard contract.
+    If they don't, derive your own start times satisfying (c) above. Either way, the
+    LATEST start time you assign to any element MUST be ≥ D − 2.0 seconds.
+
+    Every element's INITIAL CSS state must be the pre-reveal state (opacity: 0,
+    stroke-dashoffset = path length, off-screen transform). Otherwise the element shows
+    at frame 0 and the "reveal" is a no-op.
 
     Pick whichever animation technique fits — GSAP timeline with absolute time positions,
-    CSS \`@keyframes\` with \`animation-delay\` per element (with \`animation-iteration-count: 1\`
-    and \`animation-fill-mode: both\`), or anime.js with delay. The key is anchoring each step
-    to its declared start time.
+    CSS \`@keyframes\` with per-element \`animation-delay\` (plus \`animation-iteration-count: 1\`
+    and \`animation-fill-mode: both\`), or anime.js with delay. The key is one element per
+    item and start times that span the full duration.
 
 6. THE EXPLAINER OFTEN CONTAINS MULTIPLE SECTIONS OR BEATS. Map them onto the sequential timeline:
    - Identify each distinct beat in the explainer (e.g. "OPENING", "SECTION 1", "SECTION 2", "CLOSING").
@@ -145,48 +170,69 @@ ${args.voiceover}
 
 Plan before you write code:
 
-1. SCAN the explainer for explicit time markers like "Step N (a.a – b.b s):" or
-   "Beat N (a.a – b.b s):" or "at N.N s:". If present, they are a MANDATORY CONTRACT:
-   each described element must remain HIDDEN before its declared start time and begin
-   its reveal animation EXACTLY at that start time. Hit every step. Do not bunch them.
+1. ENUMERATE every visible item across all steps. A "Step" in the explainer often groups
+   multiple items. Walk each Step and break it into atomic items.
+   For each item, write down one line in your internal plan:
+     [item index]  [what it is]  [which Step it came from]
+   Example for a 12-step explainer where Step 8 lists 3 bullets:
+     1. yellow label
+     2. yellow underline
+     3. white context line A
+     4. white context line B
+     5. white separator
+     6. left box outline
+     7. left box header
+     8. left box bullet 1   ← from Step 8
+     9. left box bullet 2   ← from Step 8
+     10. left box bullet 3  ← from Step 8
+     ... and so on for every Step.
+   Each item from this list becomes ONE DOM element with ONE animation.
 
-2. If the explainer has NO time markers, plan at least
-   ${Math.max(2, Math.ceil(args.durationSeconds / 2.5))} beats spread evenly across
-   [0, ${args.durationSeconds.toFixed(2)}] yourself, one every 2–3 seconds.
+2. ASSIGN A START TIME to every item from step 1, spread across [0, ${args.durationSeconds.toFixed(2)}].
+   - Item 1 starts at or near t = 0.
+   - Item N (the last) starts at NO EARLIER than t = ${(args.durationSeconds - 2.0).toFixed(2)} seconds
+     (i.e. D − 2.0). This is a hard floor.
+   - Distribute the rest roughly evenly. No gap between consecutive items longer than
+     1.5 seconds during the first 90% of the timeline.
+   - "One after another" items inside a step are staggered (e.g. 0.5–0.8s between each).
 
-3. CRITICAL — each element's INITIAL STATE in CSS must be the pre-reveal state
-   (opacity: 0, or stroke-dashoffset = path length, or visibility: hidden, or transform:
-   translate / scale that puts it off-screen / shrunk). Otherwise the element shows
-   immediately at frame 0 and your "reveal animation" is a no-op — the screen ends up
-   fully drawn at t=0 and looks frozen / looping for the remaining seconds. Double-check
-   this for every element you add.
+3. If the explainer has explicit time markers like "Step N (a–b s):" or "Beat N (a–b s):",
+   those override your computed times for the matching step's start. Items WITHIN a step
+   spread inside that step's window.
 
-4. Use whatever technique you prefer to drive the reveals, but anchor each one to its
-   declared start time. The two most reliable options:
+4. EACH ITEM'S INITIAL CSS STATE must be the pre-reveal state — opacity: 0, or
+   stroke-dashoffset = path length, or off-screen transform. Otherwise the item
+   shows at frame 0 and the "reveal" is a no-op.
 
+5. CHOOSE a technique consistently across the whole composition:
    a) GSAP timeline with absolute time positions:
         const tl = gsap.timeline();
-        tl.from('.el', { opacity: 0, duration: 0.6 }, START_TIME_SECONDS);
-      Use \`.from()\` (animates FROM the given start state to the element's CSS final state)
-      so you don't depend on CSS being pre-set. Or set CSS to the start state and use
-      \`.to()\` to the final state. Either works — just be consistent.
+        tl.from('.el-1', { opacity: 0, y: 8, duration: 0.6 }, START_TIME);
+      Prefer .from() so the element's CSS final state is the destination — less risk
+      of forgetting the initial state.
+   b) CSS @keyframes per element with \`animation-delay: <start>s\`,
+      \`animation-iteration-count: 1\`, \`animation-fill-mode: both\`. \`both\` makes the
+      element hold its 0% state before the delay AND its 100% state after the animation.
 
-   b) CSS @keyframes per element with \`animation-delay: <start>s;\` and
-      \`animation-iteration-count: 1; animation-fill-mode: both;\` so the element holds
-      both its initial state (before delay) and its final state (after animation ends).
+6. Final 0.5–1.5 seconds of the timeline is the settle hold. All items are visible.
+   You MAY add ONE single-pass effect on the whole composition (slow zoom 1.00→1.02,
+   slow pan, slow gradient drift) ending at exactly ${args.durationSeconds.toFixed(2)}s.
+   One pass, not looping.
 
-5. The final 0.5–1.5 seconds is the settle hold. Everything is already visible by then.
-   You MAY add ONE single-pass effect across the whole composition (slow zoom 1.00→1.02,
-   slow pan, slow gradient drift) that ends exactly at ${args.durationSeconds.toFixed(2)}s.
-   Single-pass, not looping.
+7. NEVER \`infinite\`, NEVER \`repeat: -1\`, NEVER \`repeatCount="indefinite"\`,
+   NEVER \`setInterval\` for visible motion. Every \`@keyframes\` user MUST set
+   \`animation-iteration-count: 1\` and \`animation-fill-mode\` explicitly.
 
-6. No \`@keyframes\` rule on a visible element may omit \`animation-iteration-count: 1\`
-   and \`animation-fill-mode\` (use \`forwards\` or \`both\`). No \`infinite\`.
-   No \`repeat: -1\`. No \`repeatCount="indefinite"\`. No \`setInterval\` for visible motion.
+8. If you find your enumerated items in step 1 are too few to fill ${args.durationSeconds.toFixed(2)} seconds
+   without large gaps, ADD supporting items (a decorative arrow, a small doodle, an
+   accent stroke) that fit the explainer's tone. Never pad by repeating earlier motion.
 
-7. If you can't fill ${args.durationSeconds.toFixed(2)} seconds with the listed steps,
-   add supporting visuals consistent with the explainer (a callout, an arrow, a doodle,
-   an accent). Never pad by repeating earlier motion.
+VERIFICATION before submitting:
+- I have N distinct DOM elements, one per visible item.
+- The LAST element's animation start time is ≥ ${(args.durationSeconds - 2.0).toFixed(2)}s.
+- No two consecutive items are more than 1.5s apart in start time.
+- Every element's initial CSS is the pre-reveal state.
+- Zero infinite/repeat animations anywhere.
 
 Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
 }
