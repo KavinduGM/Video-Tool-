@@ -75,21 +75,21 @@ Hard requirements you MUST follow:
 5b. STEP / BEAT TIMESTAMPS IN THE EXPLAINER ARE A MANDATORY CONTRACT.
     If the user's explainer contains lines like \`Step 1 (0.0 – 1.6s):\`, \`Beat 3 (2.4 – 4.0s):\`,
     \`at 5.5s: …\`, or any other explicit time markers, you MUST:
-    - Honor each timestamp EXACTLY. The element described in Step 3 at 2.4s starts its
-      reveal animation at t = 2.4s, not earlier and not later.
+    - Honor each timestamp EXACTLY. The element described in Step 3 at 2.4s remains hidden
+      before 2.4s and begins its reveal animation at exactly t = 2.4s.
     - Place every step in the timeline at its declared time, even if it means the early steps
       finish quickly and the later steps have to wait.
     - Do NOT condense the steps into the first few seconds and then leave the rest of the
-      timeline empty. That is the most common failure mode and produces a video that
-      looks like it loops or freezes.
-    - Build ONE master \`gsap.timeline({ paused: false })\` and schedule every animation at its
-      ABSOLUTE position using the third argument:
-          tl.to('#title', { opacity: 1, duration: 0.8 }, 0.0)
-          tl.to('#underline', { strokeDashoffset: 0, duration: 0.6 }, 1.0)
-          tl.to('#subtitle', { opacity: 1, duration: 0.7 }, 1.8)
-      (The trailing number is the absolute start time in seconds — use this, not delay-chains.)
-    - If the explainer has no explicit timestamps, fall back to rule 5 (compute beats yourself,
-      ceil(D/2.5) of them, evenly distributed).
+      timeline empty. That is the most common failure mode and produces a video that looks
+      like it loops or freezes.
+    - Critically: every element's INITIAL CSS state must be the pre-reveal state (opacity: 0,
+      or stroke-dashoffset = path length, or off-screen transform). Otherwise the element
+      shows at frame 0 and your "reveal" is a no-op.
+
+    Pick whichever animation technique fits — GSAP timeline with absolute time positions,
+    CSS \`@keyframes\` with \`animation-delay\` per element (with \`animation-iteration-count: 1\`
+    and \`animation-fill-mode: both\`), or anime.js with delay. The key is anchoring each step
+    to its declared start time.
 
 6. THE EXPLAINER OFTEN CONTAINS MULTIPLE SECTIONS OR BEATS. Map them onto the sequential timeline:
    - Identify each distinct beat in the explainer (e.g. "OPENING", "SECTION 1", "SECTION 2", "CLOSING").
@@ -143,47 +143,52 @@ The voiceover that will be played over this scene (for tone/pacing reference onl
 ${args.voiceover}
 """
 
-Before you write any animation code, plan internally:
+Plan before you write code:
 
-1. SCAN the explainer for explicit time markers. Look for patterns like
-   "Step N (a.a – b.b s):", "Beat N (a.a – b.b s):", "at N.N s:", "N s –", etc.
-   If you find them, they are a MANDATORY CONTRACT — each described element starts its
-   animation exactly at the stated time. Skip steps 2–3 below; jump straight to step 4 and
-   schedule every animation at its stated absolute time.
+1. SCAN the explainer for explicit time markers like "Step N (a.a – b.b s):" or
+   "Beat N (a.a – b.b s):" or "at N.N s:". If present, they are a MANDATORY CONTRACT:
+   each described element must remain HIDDEN before its declared start time and begin
+   its reveal animation EXACTLY at that start time. Hit every step. Do not bunch them.
 
-2. If the explainer has NO time markers, list the distinct beats / SECTIONS yourself in order.
-   Plan at least ${Math.max(2, Math.ceil(args.durationSeconds / 2.5))} beats total across the ${args.durationSeconds.toFixed(2)}-second timeline,
-   one beat every 2–3 seconds. If the explainer doesn't provide that many beats explicitly,
-   subdivide each section into smaller sub-beats (e.g. "title writes in", "underline draws",
-   "subtitle writes in" are three beats inside one opening section).
+2. If the explainer has NO time markers, plan at least
+   ${Math.max(2, Math.ceil(args.durationSeconds / 2.5))} beats spread evenly across
+   [0, ${args.durationSeconds.toFixed(2)}] yourself, one every 2–3 seconds.
 
-3. Assign each beat a start time and a length so they tile [0, ${args.durationSeconds.toFixed(2)}]
-   with no gaps and no overlap (except optional 0.3–0.6s crossfades). The last beat should end
-   at approximately ${(args.durationSeconds - 0.8).toFixed(2)} seconds, leaving a ~0.8 s settle hold.
+3. CRITICAL — each element's INITIAL STATE in CSS must be the pre-reveal state
+   (opacity: 0, or stroke-dashoffset = path length, or visibility: hidden, or transform:
+   translate / scale that puts it off-screen / shrunk). Otherwise the element shows
+   immediately at frame 0 and your "reveal animation" is a no-op — the screen ends up
+   fully drawn at t=0 and looks frozen / looping for the remaining seconds. Double-check
+   this for every element you add.
 
-4. Build ONE master GSAP timeline and schedule every reveal at its ABSOLUTE time position
-   (the third arg to .to / .from / .fromTo / .add). Do NOT use delay-chains or "start when
-   previous ends" defaults — those compound rounding errors and finish early. Example:
-       const tl = gsap.timeline({ paused: false });
-       tl.to('#title',      { opacity: 1, y: 0,  duration: 0.8 }, 0.0);  // starts at t=0.0s
-       tl.to('#underline',  { strokeDashoffset: 0, duration: 0.6 }, 1.0); // starts at t=1.0s
-       tl.to('#subtitle',   { opacity: 1, duration: 0.7 }, 1.8);          // starts at t=1.8s
-       // ... continue until your last reveal ends at or before ${(args.durationSeconds - 0.5).toFixed(2)}s
-       tl.to('#stage-inner', { scale: 1.02, duration: ${(args.durationSeconds * 0.6).toFixed(2)}, ease: 'sine.inOut' }, 0); // optional settle motion, one-shot
+4. Use whatever technique you prefer to drive the reveals, but anchor each one to its
+   declared start time. The two most reliable options:
 
-5. During the settle hold (final ~0.8 s) you MAY add ONE gentle single-pass effect such as
-   a very slow zoom (scale 1 → 1.02), a slow pan, or a slow gradient drift — but it must run
-   exactly once and end exactly at ${args.durationSeconds.toFixed(2)} seconds. NEVER loop it.
+   a) GSAP timeline with absolute time positions:
+        const tl = gsap.timeline();
+        tl.from('.el', { opacity: 0, duration: 0.6 }, START_TIME_SECONDS);
+      Use \`.from()\` (animates FROM the given start state to the element's CSS final state)
+      so you don't depend on CSS being pre-set. Or set CSS to the start state and use
+      \`.to()\` to the final state. Either works — just be consistent.
 
-6. Then write the HTML. Every animation runs exactly once. Every \`@keyframes\` user must set
-   \`animation-iteration-count: 1\` AND \`animation-fill-mode: forwards\` explicitly.
-   No \`repeat: -1\`. No \`infinite\`. No \`repeatCount="indefinite"\`.
+   b) CSS @keyframes per element with \`animation-delay: <start>s;\` and
+      \`animation-iteration-count: 1; animation-fill-mode: both;\` so the element holds
+      both its initial state (before delay) and its final state (after animation ends).
 
-7. If you cannot think of enough content to fill ${args.durationSeconds.toFixed(2)} seconds,
-   INVENT supporting visuals consistent with the explainer (decorative annotations, supporting
-   bullets, a callout arrow, a count-up number, an icon). Do NOT pad by repeating earlier motion.
+5. The final 0.5–1.5 seconds is the settle hold. Everything is already visible by then.
+   You MAY add ONE single-pass effect across the whole composition (slow zoom 1.00→1.02,
+   slow pan, slow gradient drift) that ends exactly at ${args.durationSeconds.toFixed(2)}s.
+   Single-pass, not looping.
 
-Return ONLY the full HTML document.`
+6. No \`@keyframes\` rule on a visible element may omit \`animation-iteration-count: 1\`
+   and \`animation-fill-mode\` (use \`forwards\` or \`both\`). No \`infinite\`.
+   No \`repeat: -1\`. No \`repeatCount="indefinite"\`. No \`setInterval\` for visible motion.
+
+7. If you can't fill ${args.durationSeconds.toFixed(2)} seconds with the listed steps,
+   add supporting visuals consistent with the explainer (a callout, an arrow, a doodle,
+   an accent). Never pad by repeating earlier motion.
+
+Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
 }
 
 export interface SceneHtmlResult {
