@@ -79,7 +79,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
 
     cb.onProgress(baseProgress + sceneShare * 0.2, `Scene ${i + 1}/${totalScenes}: composing HTML with Claude`)
     cb.onLog(info(`Scene ${i + 1}: asking Claude (${settings.claude_model}) for HTML`))
-    const html = await generateSceneHtml({
+    const { html, sanitized } = await generateSceneHtml({
       apiKey: settings.anthropic_api_key,
       model: settings.claude_model,
       ratio: spec.ratio,
@@ -90,6 +90,10 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       voiceover: scene.voiceover,
       style: spec.style
     })
+    if (sanitized.length > 0) {
+      cb.onLog(info(`Scene ${i + 1}: sanitized ${sanitized.length} looping construct(s) from Claude's HTML:`))
+      for (const note of sanitized) cb.onLog(info(`  - ${note}`))
+    }
 
     const projectDir = path.join(sceneDir, 'hyperframes')
     await scaffoldProject(projectDir, html)
