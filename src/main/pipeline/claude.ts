@@ -240,27 +240,199 @@ Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
 export interface SceneHtmlResult {
   html: string
   sanitized: string[]
+  attempts: number
+  validationStatus: 'passed' | 'failed-after-retries'
+  validationLog: string[]
 }
+
+/**
+ * Walk the generated HTML and find the latest moment any element begins its reveal
+ * animation. Catches CSS animation-delay, GSAP timeline absolute-position args
+ * (third arg to .to/.from/.fromTo/.set/.add), SVG <animate begin="">, and the
+ * Web Animations API / anime.js `delay:` property. Returns the maximum start time
+ * in seconds and the count of timed reveals it found.
+ */
+export function extractMaxAnimationStartTime(html: string): {
+  maxStartSeconds: number
+  found: number
+  starts: number[]
+} {
+  const starts: number[] = []
+  const push = (v: number) => {
+    if (Number.isFinite(v) && v >= 0 && v < 600) starts.push(v)
+  }
+
+  // CSS  animation-delay: 1.5s | 1500ms
+  for (const m of html.matchAll(/animation-delay\s*:\s*([-+]?[\d.]+)\s*(s|ms)\b/gi)) {
+    const v = parseFloat(m[1])
+    push(m[2].toLowerCase() === 'ms' ? v / 1000 : v)
+  }
+
+  // CSS shorthand: animation: name 1s 2s ...  — second time value is the delay.
+  for (const m of html.matchAll(
+    /animation\s*:\s*[A-Za-z_-][\w-]*\s+([\d.]+)(s|ms)\s+([\d.]+)(s|ms)/gi
+  )) {
+    const v = parseFloat(m[3])
+    push(m[4].toLowerCase() === 'ms' ? v / 1000 : v)
+  }
+
+  // GSAP: .to(target, vars, position), .from(...), .fromTo(...), .set(...), .add(...)
+  // We catch the case where the LAST positional arg is a plain number (absolute time).
+  for (const m of html.matchAll(
+    /\.\s*(?:to|from|fromTo|set|add)\s*\(([\s\S]*?)\)/g
+  )) {
+    const args = m[1]
+    // Find the last top-level numeric literal argument.
+    const trailing = args.match(/,\s*([\d.]+)\s*$/)
+    if (trailing) push(parseFloat(trailing[1]))
+  }
+
+  // SVG <animate begin="2.5s"> / begin="2500ms" / begin="2"
+  for (const m of html.matchAll(
+    /<animate(?:Motion|Transform)?\b[^>]*\bbegin\s*=\s*["']\s*([\d.]+)\s*(s|ms)?\s*["']/gi
+  )) {
+    const v = parseFloat(m[1])
+    push((m[2] ?? 's').toLowerCase() === 'ms' ? v / 1000 : v)
+  }
+
+  // Web Animations / anime.js: { delay: 1500 } — usually milliseconds.
+  for (const m of html.matchAll(/\bdelay\s*:\s*([\d.]+)\s*[,}\n]/g)) {
+    const v = parseFloat(m[1])
+    // Heuristic: anything > 30 is almost certainly ms (a 30-second delay is implausible),
+    // anything ≤ 30 we treat as seconds (GSAP delay convention).
+    push(v > 30 ? v / 1000 : v)
+  }
+
+  const maxStartSeconds = starts.length > 0 ? Math.max(...starts) : 0
+  return { maxStartSeconds, found: starts.length, starts }
+}
+
+export interface ValidationResult {
+  ok: boolean
+  maxStartSeconds: number
+  found: number
+  reason?: string
+}
+
+/**
+ * Coverage rule: the last animation in the scene MUST start no earlier than D - 2.0 seconds.
+ * If it starts earlier, the visible timeline is compressed into the front of the scene
+ * and the tail will look frozen or looping. We treat this as a generation failure and retry.
+ */
+export function validateAnimationCoverage(html: string, durationSeconds: number): ValidationResult {
+  const { maxStartSeconds, found } = extractMaxAnimationStartTime(html)
+  const minRequired = Math.max(0.5, durationSeconds - 2.0)
+
+  if (found === 0) {
+    return {
+      ok: false,
+      maxStartSeconds: 0,
+      found: 0,
+      reason:
+        'No animation start times detected anywhere in the HTML (no CSS animation-delay, no GSAP positional args, no SVG begin=, no delay: properties). The composition has no scheduled timeline — every element would appear at frame 0.'
+    }
+  }
+
+  if (maxStartSeconds < minRequired) {
+    return {
+      ok: false,
+      maxStartSeconds,
+      found,
+      reason:
+        `The latest animation in the HTML starts at t=${maxStartSeconds.toFixed(2)}s, ` +
+        `but for a ${durationSeconds.toFixed(2)}s scene the last animation must start no earlier than ` +
+        `t=${minRequired.toFixed(2)}s (D − 2.0). The timeline is compressed into the first ` +
+        `${(maxStartSeconds + 1).toFixed(1)}s, leaving the rest static or looping.`
+    }
+  }
+
+  return { ok: true, maxStartSeconds, found }
+}
+
+const MAX_ATTEMPTS = 3
 
 export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtmlResult> {
   if (!args.apiKey) throw new Error('Anthropic API key is not set in Settings.')
   const client = new Anthropic({ apiKey: args.apiKey })
 
-  const resp = await client.messages.create({
-    model: args.model || 'claude-opus-4-7',
-    max_tokens: 16000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildUserPrompt(args) }]
-  })
+  const log: string[] = []
+  let lastSanitized: string[] = []
+  let lastHtml = ''
+  let lastReason = ''
 
-  const text = resp.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as Anthropic.TextBlock).text)
-    .join('\n')
-    .trim()
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const userPrompt = buildUserPromptForAttempt(args, attempt, lastReason)
 
-  const html = extractHtml(text)
-  return sanitizeLoops(html)
+    const resp = await client.messages.create({
+      model: args.model || 'claude-opus-4-7',
+      max_tokens: 16000,
+      temperature: 0.4,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+
+    const text = resp.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as Anthropic.TextBlock).text)
+      .join('\n')
+      .trim()
+
+    const html = extractHtml(text)
+    const { html: cleanHtml, sanitized } = sanitizeLoops(html)
+    const validation = validateAnimationCoverage(cleanHtml, args.durationSeconds)
+
+    lastSanitized = sanitized
+    lastHtml = cleanHtml
+
+    if (validation.ok) {
+      log.push(
+        `attempt ${attempt}/${MAX_ATTEMPTS}: passed (last animation at t=${validation.maxStartSeconds.toFixed(2)}s, ${validation.found} timed reveals)`
+      )
+      return {
+        html: cleanHtml,
+        sanitized,
+        attempts: attempt,
+        validationStatus: 'passed',
+        validationLog: log
+      }
+    }
+
+    lastReason = validation.reason ?? 'unknown failure'
+    log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED — ${lastReason}`)
+  }
+
+  return {
+    html: lastHtml,
+    sanitized: lastSanitized,
+    attempts: MAX_ATTEMPTS,
+    validationStatus: 'failed-after-retries',
+    validationLog: log
+  }
+}
+
+function buildUserPromptForAttempt(
+  args: SceneRenderArgs,
+  attempt: number,
+  prevReason: string
+): string {
+  const basePrompt = buildUserPrompt(args)
+  if (attempt === 1) return basePrompt
+
+  const minRequired = Math.max(0.5, args.durationSeconds - 2.0)
+  return (
+    basePrompt +
+    `\n\n---\n` +
+    `RETRY — your previous attempt failed automated validation:\n\n` +
+    `  ${prevReason}\n\n` +
+    `You MUST fix this in this attempt:\n` +
+    `  - The LAST visible animation start time MUST be ≥ ${minRequired.toFixed(2)}s\n` +
+    `    (we measure this by scanning the HTML for CSS animation-delay,\n` +
+    `     GSAP positional args, SVG begin=, and delay: properties).\n` +
+    `  - Spread your animations across the full ${args.durationSeconds.toFixed(2)}s duration.\n` +
+    `  - Every visible item from the explainer is its own DOM element with its own staggered start time.\n` +
+    `  - Do NOT cluster all reveals into the first few seconds.\n` +
+    `Return ONLY the corrected complete HTML document.`
+  )
 }
 
 /**
@@ -275,7 +447,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
  *   - anime.js  loop: true | loop: N | direction: 'alternate' with loop
  *   - setInterval used for animation (can't auto-fix; logged as a warning)
  */
-export function sanitizeLoops(html: string): SceneHtmlResult {
+export function sanitizeLoops(html: string): { html: string; sanitized: string[] } {
   const notes: string[] = []
   let out = html
 

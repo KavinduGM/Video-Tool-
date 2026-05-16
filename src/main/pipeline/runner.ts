@@ -84,7 +84,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
 
     cb.onProgress(baseProgress + sceneShare * 0.2, `Scene ${i + 1}/${totalScenes}: composing HTML with Claude`)
     cb.onLog(info(`Scene ${i + 1}: asking Claude (${settings.claude_model}) for HTML`))
-    const { html, sanitized } = await generateSceneHtml({
+    const claudeResult = await generateSceneHtml({
       apiKey: settings.anthropic_api_key,
       model: settings.claude_model,
       ratio: spec.ratio,
@@ -95,6 +95,17 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       voiceover: scene.voiceover,
       style: spec.style
     })
+    const { html, sanitized, attempts, validationStatus, validationLog } = claudeResult
+    for (const line of validationLog) cb.onLog(info(`Scene ${i + 1}: ${line}`))
+    if (validationStatus === 'failed-after-retries') {
+      cb.onLog({
+        ts: Date.now(),
+        level: 'warn',
+        message: `Scene ${i + 1}: animation-coverage validation failed after ${attempts} attempts — using the best output anyway. Final video may have a frozen tail.`
+      })
+    } else if (attempts > 1) {
+      cb.onLog(info(`Scene ${i + 1}: passed validation on attempt ${attempts}/${attempts}`))
+    }
     if (sanitized.length > 0) {
       cb.onLog(info(`Scene ${i + 1}: sanitized ${sanitized.length} looping construct(s) from Claude's HTML:`))
       for (const note of sanitized) cb.onLog(info(`  - ${note}`))
