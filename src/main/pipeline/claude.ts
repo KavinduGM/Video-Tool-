@@ -366,7 +366,6 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
     const resp = await client.messages.create({
       model: args.model || 'claude-opus-4-7',
       max_tokens: 16000,
-      temperature: 0.4,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }]
     })
