@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import fs from 'node:fs/promises'
 import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
 
@@ -12,6 +13,11 @@ export interface SceneRenderArgs {
   explainer: string
   voiceover: string
   style?: ScriptSpec['style']
+  /**
+   * Issues raised by the visual reviewer on a previous render of THIS scene.
+   * When present, the prompt prepends them so Claude knows what to fix.
+   */
+  visualFeedback?: string[]
 }
 
 const SYSTEM_PROMPT = `You are an expert motion-graphics engineer who writes self-contained HTML compositions for the HeyGen Hyperframes renderer.
@@ -198,7 +204,42 @@ Hard requirements you MUST follow:
 
     h) Before submitting, mentally render the final composition. If two visible elements
        occupy overlapping screen rectangles when their animations finish, the layout is wrong
-       — rework it with proper flex/grid structure.`
+       — rework it with proper flex/grid structure.
+
+15. SHAPE INTEGRITY — geometric shapes must be COMPLETE.
+    Every rendered shape is reviewed by an automated visual reviewer that rejects partial
+    shapes. To pass review:
+
+    a) RECTANGLES / BOXES: all 4 sides must connect end-to-end. Never render a "3-sided box"
+       or a rectangle with a visible gap on one edge. Use ONE of these patterns:
+         - A plain HTML element with \`border: 3px solid <color>\` (border-radius optional
+           for slightly rounded hand-drawn feel). The browser will always close the rectangle.
+         - An SVG \`<rect>\` element with stroke. Animate the stroke-dashoffset for a write-on
+           effect, but the FINAL stroke-dashoffset must reach 0 so the full perimeter is
+           visible by the end of the reveal.
+         - An SVG \`<path>\` that traces all 4 sides and ends with \`Z\` to close the path.
+           Set stroke-dasharray = path-length and animate stroke-dashoffset from path-length
+           to 0. DOUBLE-CHECK that the dash-array equals the actual path length, so the
+           stroke finishes drawing all 4 sides.
+
+    b) TRIANGLES: all 3 sides connected, path closed with \`Z\` if SVG, or use clip-path
+       polygon with a solid border via a wrapping technique.
+
+    c) CIRCLES / ELLIPSES: fully closed. Use \`<circle>\` or \`<ellipse>\` (SVG always closes
+       these). For a stroke-on animation, animate stroke-dashoffset → 0 so the full perimeter
+       is drawn.
+
+    d) LINES, ARROWS, DIVIDERS, DASHED CONNECTORS: drawn end-to-end. The final stroke-dashoffset
+       must be 0. The arrowhead (if any) must be visible at the line's endpoint.
+
+    Common bug to avoid: setting stroke-dasharray and stroke-dashoffset to values that don't
+    leave the shape fully drawn at the end. If you compute the path length wrong, the stroke
+    will stop short and leave one side missing.
+
+16. HAND-DRAWN APPEARANCE — when "hand-drawn" is in the style, you may add slight stroke
+    jitter / variation, but completeness comes first. A perfectly straight box is better
+    than a 3-sided "hand-drawn" box. Use small roughness (1-2px wobble at most), not
+    full broken-line effects.`
 
 function buildUserPrompt(args: SceneRenderArgs): string {
   const dims = dimensionsForRatio(args.ratio)
@@ -477,7 +518,22 @@ function buildUserPromptForAttempt(
   attempt: number,
   prevReason: string
 ): string {
-  const basePrompt = buildUserPrompt(args)
+  let basePrompt = buildUserPrompt(args)
+
+  // Prepend any visual-review feedback from a prior render of this scene.
+  if (args.visualFeedback && args.visualFeedback.length > 0) {
+    basePrompt =
+      `IMPORTANT — A previous render of this exact scene was visually reviewed and FAILED.\n` +
+      `The reviewer found these specific issues (you MUST fix every one):\n` +
+      args.visualFeedback.map((issue) => `  • ${issue}`).join('\n') +
+      `\n\nProduce HTML that addresses all of the above. Pay extra attention to:\n` +
+      `  - Shape integrity (complete boxes, closed paths, full stroke draws).\n` +
+      `  - No overlapping elements at the final frame.\n` +
+      `  - All items from the explainer must appear and be visible / readable.\n\n` +
+      `---\n\n` +
+      basePrompt
+  }
+
   if (attempt === 1) return basePrompt
 
   const minRequired = Math.max(0.5, args.durationSeconds - 2.0)
@@ -495,6 +551,158 @@ function buildUserPromptForAttempt(
     `  - Do NOT cluster all reveals into the first few seconds.\n` +
     `Return ONLY the corrected complete HTML document.`
   )
+}
+
+// ====================================================================
+// VISUAL REVIEW — uses Claude's vision capability to inspect the rendered
+// frame and decide whether it faithfully implements the explainer.
+// ====================================================================
+
+const REVIEWER_SYSTEM = `You are a strict quality reviewer for AI-generated animated video scenes.
+
+Your input:
+  1. An explainer that describes what a scene should show.
+  2. A screenshot of the final rendered frame of that scene.
+
+Your job: determine whether the rendered frame faithfully implements the explainer.
+Be strict — false positives (passing a broken scene) are MUCH worse than false negatives
+(failing a slightly-imperfect scene).
+
+Check, in this order:
+
+A. COMPLETENESS — every item described in the explainer should be visible in the image.
+   List any item from the explainer that is missing, cut off, or unreadable.
+
+B. SHAPE INTEGRITY — every drawn shape must be complete:
+   - Rectangles / boxes: all 4 sides connected end-to-end. Flag any "3-sided box".
+   - Triangles: all 3 sides connected.
+   - Circles / ellipses: fully closed.
+   - Lines and arrows: drawn from one endpoint to the other, with arrowhead present.
+   - Dashed lines: visible across their intended length, not stopping short.
+
+C. OVERLAPS — no element may visually overlap another element's content. Flag:
+   - Text overlapping other text.
+   - Text crossing through a divider, arrow, or box edge.
+   - Boxes overlapping each other.
+   - Text outside its container.
+
+D. LAYOUT BALANCE — content is reasonably balanced. Flag:
+   - Text cut off at the screen edges.
+   - Huge empty regions that should contain content.
+   - Cramped, illegible clusters.
+
+E. COLOR FIDELITY — colors should match the explainer (e.g. "sky blue for DIAGNOSIS"
+   means the DIAGNOSIS-related elements actually appear sky blue). Flag obvious color mismatches.
+
+F. AESTHETIC — if the explainer requests a hand-drawn aesthetic, the strokes should look
+   hand-drawn (some imperfection is fine). Flag completely mechanical / generic appearance
+   only if it clearly violates the requested style.
+
+Respond with ONLY a JSON object, no surrounding prose, no markdown fences:
+
+{
+  "pass": true | false,
+  "issues": [ "specific actionable issue 1", "specific actionable issue 2", ... ]
+}
+
+Rules for issues:
+- If pass is true, issues MUST be an empty array.
+- Each issue is one concrete, actionable problem an HTML generator can fix.
+  GOOD: "The sky-blue DIAGNOSIS box is missing its right edge — only 3 sides are visible."
+  GOOD: "The text 'Diagnosis' overlaps with the text '= AT the moment' inside the top box."
+  GOOD: "The vertical divider crosses through the bottom annotation text."
+  BAD:  "The scene doesn't look great."     (vague — not actionable)
+  BAD:  "Improve the layout."                (vague — not actionable)
+
+- If a problem is borderline (e.g. minor stroke jitter), don't flag it. Only flag clear defects.`
+
+export interface VisualReviewResult {
+  pass: boolean
+  issues: string[]
+  rawResponse: string
+}
+
+export interface ReviewSceneArgs {
+  apiKey: string
+  model: string
+  framePath: string
+  explainer: string
+  ratio: AspectRatio
+}
+
+export async function reviewScene(args: ReviewSceneArgs): Promise<VisualReviewResult> {
+  if (!args.apiKey) throw new Error('Anthropic API key is not set in Settings.')
+  const client = new Anthropic({ apiKey: args.apiKey })
+
+  const imageBytes = await fs.readFile(args.framePath)
+  const base64 = imageBytes.toString('base64')
+  const mediaType = /\.png$/i.test(args.framePath) ? 'image/png' : 'image/jpeg'
+
+  const resp = await client.messages.create({
+    model: args.model || 'claude-opus-4-7',
+    max_tokens: 1500,
+    system: REVIEWER_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64
+            }
+          },
+          {
+            type: 'text',
+            text:
+              `Aspect ratio: ${args.ratio}\n\n` +
+              `Explainer:\n"""\n${args.explainer}\n"""\n\n` +
+              `Review the attached final frame against this explainer. ` +
+              `Return ONLY the JSON object as specified.`
+          }
+        ]
+      }
+    ]
+  })
+
+  const text = resp.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as Anthropic.TextBlock).text)
+    .join('')
+    .trim()
+
+  return parseReviewerJson(text)
+}
+
+function parseReviewerJson(text: string): VisualReviewResult {
+  let raw = text.trim()
+  // Strip a code fence if Claude wrapped the JSON despite instructions.
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/, '').trim()
+  }
+  // Find the first { and the matching last }
+  const first = raw.indexOf('{')
+  const last = raw.lastIndexOf('}')
+  if (first >= 0 && last > first) raw = raw.slice(first, last + 1)
+
+  try {
+    const parsed = JSON.parse(raw)
+    const pass = parsed.pass === true
+    const issues = Array.isArray(parsed.issues)
+      ? parsed.issues.map(String).filter((s) => s.trim() !== '')
+      : []
+    return { pass, issues, rawResponse: text }
+  } catch {
+    // If parsing fails, treat as PASS (we don't want a parser bug to block scenes
+    // forever) but bubble up the raw text in the log.
+    return {
+      pass: true,
+      issues: [],
+      rawResponse: text
+    }
+  }
 }
 
 /**

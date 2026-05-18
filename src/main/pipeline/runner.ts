@@ -2,16 +2,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Job, JobLogEntry } from '@shared/types'
 import { parseScript, dimensionsForRatio } from './parser'
-import { generateSceneHtml } from './claude'
+import { generateSceneHtml, reviewScene } from './claude'
 import { generateAudio } from './tts'
 import { scaffoldProject, renderHyperframes } from './hyperframes'
 import {
   concatScenesWithTransitions,
+  extractFrame,
   muxAudioWithVideo,
   probeDurationSeconds,
   ensureDir
 } from './ffmpeg'
 import { getSettings, findProfileByName, getStoragePaths } from '../settings'
+
+const MAX_VISUAL_REVIEW_ATTEMPTS = 3
 
 export interface RunnerHandle {
   cancel(): void
@@ -82,72 +85,169 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     cb.onLog(info(`Scene ${i + 1}: audio is ${audioDuration.toFixed(2)}s`))
     if (handle.cancelled) throw new Error('Cancelled')
 
-    cb.onProgress(baseProgress + sceneShare * 0.2, `Scene ${i + 1}/${totalScenes}: composing HTML with Claude`)
-    cb.onLog(info(`Scene ${i + 1}: asking Claude (${settings.claude_model}) for HTML`))
-    const claudeResult = await generateSceneHtml({
-      apiKey: settings.anthropic_api_key,
-      model: settings.claude_model,
-      ratio: spec.ratio,
-      durationSeconds: audioDuration,
-      sceneIndex: i,
-      totalScenes,
-      explainer: scene.explainer,
-      voiceover: scene.voiceover,
-      style: spec.style
-    })
-    const { html, sanitized, attempts, validationStatus, validationLog } = claudeResult
-    for (const line of validationLog) cb.onLog(info(`Scene ${i + 1}: ${line}`))
-    if (validationStatus === 'failed-after-retries') {
+    // ---------- Generate → render → visual-review loop ----------
+    // Up to MAX_VISUAL_REVIEW_ATTEMPTS times, generate HTML, render via
+    // Hyperframes, extract a representative frame, and ask Claude (with
+    // vision) to verify the frame matches the explainer. On failure, the
+    // reviewer's issues feed into the next HTML attempt.
+    const rawMp4 = path.join(sceneDir, 'render.mp4')
+    const projectDir = path.join(sceneDir, 'hyperframes')
+    let html = ''
+    let visualFeedback: string[] = []
+    let reviewPassed = false
+    let lastReviewIssues: string[] = []
+    let visualAttempt = 0
+
+    while (visualAttempt < MAX_VISUAL_REVIEW_ATTEMPTS) {
+      visualAttempt++
+      const tag = `Scene ${i + 1} attempt ${visualAttempt}/${MAX_VISUAL_REVIEW_ATTEMPTS}`
+
+      cb.onProgress(
+        baseProgress + sceneShare * 0.2,
+        `${tag}: composing HTML with Claude`
+      )
+      cb.onLog(info(`${tag}: asking Claude (${settings.claude_model}) for HTML${visualFeedback.length ? ` with ${visualFeedback.length} reviewer issue(s) to fix` : ''}`))
+      const claudeResult = await generateSceneHtml({
+        apiKey: settings.anthropic_api_key,
+        model: settings.claude_model,
+        ratio: spec.ratio,
+        durationSeconds: audioDuration,
+        sceneIndex: i,
+        totalScenes,
+        explainer: scene.explainer,
+        voiceover: scene.voiceover,
+        style: spec.style,
+        visualFeedback: visualFeedback.length ? visualFeedback : undefined
+      })
+      html = claudeResult.html
+      for (const line of claudeResult.validationLog) cb.onLog(info(`${tag}: ${line}`))
+      if (claudeResult.validationStatus === 'failed-after-retries') {
+        cb.onLog({
+          ts: Date.now(),
+          level: 'warn',
+          message: `${tag}: animation-coverage validation failed after ${claudeResult.attempts} HTML attempts — proceeding with the best output.`
+        })
+      }
+      if (claudeResult.sanitized.length > 0) {
+        cb.onLog(info(`${tag}: sanitized ${claudeResult.sanitized.length} looping construct(s):`))
+        for (const note of claudeResult.sanitized) cb.onLog(info(`  - ${note}`))
+      }
+
+      // Render the HTML
+      await scaffoldProject(projectDir, html)
+      if (handle.cancelled) throw new Error('Cancelled')
+
+      cb.onProgress(
+        baseProgress + sceneShare * 0.4,
+        `${tag}: rendering with Hyperframes`
+      )
+      await renderHyperframes({
+        command: settings.hyperframes_command,
+        projectDir,
+        outputMp4: rawMp4,
+        onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
+      })
+      if (handle.cancelled) throw new Error('Cancelled')
+
+      // Render duration sanity check (informational only — doesn't trigger retry on its own)
+      try {
+        const renderDuration = await probeDurationSeconds(rawMp4)
+        const diff = renderDuration - audioDuration
+        if (Math.abs(diff) > 0.5) {
+          cb.onLog(info(
+            `${tag}: WARNING — Hyperframes rendered ${renderDuration.toFixed(2)}s, audio is ${audioDuration.toFixed(2)}s (diff ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}s).`
+          ))
+        } else {
+          cb.onLog(info(`${tag}: render duration ${renderDuration.toFixed(2)}s matches audio (${audioDuration.toFixed(2)}s) ✓`))
+        }
+      } catch (err: any) {
+        cb.onLog(info(`${tag}: could not probe render duration — ${err.message}`))
+      }
+
+      // Extract the final frame for visual review
+      cb.onProgress(
+        baseProgress + sceneShare * 0.6,
+        `${tag}: visual review (frame extraction)`
+      )
+      const reviewFramePath = path.join(sceneDir, `review_attempt_${visualAttempt}.jpg`)
+      const grabAt = Math.max(0.1, audioDuration - 0.3)
+      try {
+        await extractFrame(
+          { videoIn: rawMp4, atSeconds: grabAt, out: reviewFramePath, quality: 3 },
+          (line) => cb.onLog(info(`ffmpeg: ${line}`))
+        )
+      } catch (err: any) {
+        cb.onLog({
+          ts: Date.now(),
+          level: 'warn',
+          message: `${tag}: frame extraction failed (${err.message}) — skipping visual review for this attempt.`
+        })
+        // Treat as pass so we proceed; no point retrying without a frame to compare.
+        reviewPassed = true
+        lastReviewIssues = []
+        break
+      }
+
+      cb.onProgress(
+        baseProgress + sceneShare * 0.65,
+        `${tag}: visual review (Claude vision)`
+      )
+      cb.onLog(info(`${tag}: visual review — comparing rendered frame to explainer`))
+      let review
+      try {
+        review = await reviewScene({
+          apiKey: settings.anthropic_api_key,
+          model: settings.claude_model,
+          framePath: reviewFramePath,
+          explainer: scene.explainer,
+          ratio: spec.ratio
+        })
+      } catch (err: any) {
+        cb.onLog({
+          ts: Date.now(),
+          level: 'warn',
+          message: `${tag}: visual review call failed (${err.message}) — accepting the render and moving on.`
+        })
+        reviewPassed = true
+        lastReviewIssues = []
+        break
+      }
+
+      lastReviewIssues = review.issues
+      if (review.pass) {
+        cb.onLog(info(`${tag}: visual review PASSED ✓`))
+        reviewPassed = true
+        break
+      }
+
       cb.onLog({
         ts: Date.now(),
         level: 'warn',
-        message: `Scene ${i + 1}: animation-coverage validation failed after ${attempts} attempts — using the best output anyway. Final video may have a frozen tail.`
+        message: `${tag}: visual review FAILED — ${review.issues.length} issue(s):`
       })
-    } else if (attempts > 1) {
-      cb.onLog(info(`Scene ${i + 1}: passed validation on attempt ${attempts}/${attempts}`))
-    }
-    if (sanitized.length > 0) {
-      cb.onLog(info(`Scene ${i + 1}: sanitized ${sanitized.length} looping construct(s) from Claude's HTML:`))
-      for (const note of sanitized) cb.onLog(info(`  - ${note}`))
-    }
-
-    const projectDir = path.join(sceneDir, 'hyperframes')
-    await scaffoldProject(projectDir, html)
-    if (handle.cancelled) throw new Error('Cancelled')
-
-    cb.onProgress(baseProgress + sceneShare * 0.4, `Scene ${i + 1}/${totalScenes}: rendering with Hyperframes`)
-    const rawMp4 = path.join(sceneDir, 'render.mp4')
-    await renderHyperframes({
-      command: settings.hyperframes_command,
-      projectDir,
-      outputMp4: rawMp4,
-      onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
-    })
-    if (handle.cancelled) throw new Error('Cancelled')
-
-    // Verify the render's actual duration against the audio's. A big mismatch
-    // means either Claude set data-duration too short (→ ffmpeg will freeze
-    // the last frame for the remaining audio) or too long (→ wasted render).
-    try {
-      const renderDuration = await probeDurationSeconds(rawMp4)
-      const diff = renderDuration - audioDuration
-      if (Math.abs(diff) > 0.5) {
-        cb.onLog(info(
-          `Scene ${i + 1}: WARNING — Hyperframes rendered ${renderDuration.toFixed(2)}s, ` +
-          `audio is ${audioDuration.toFixed(2)}s (diff ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}s). ` +
-          (diff < -0.5
-            ? 'The final frame will be held for the remaining audio. ' +
-              'Open the saved HTML to inspect Claude\'s data-duration / element timings.'
-            : 'Extra render time was discarded.')
-        ))
-      } else {
-        cb.onLog(info(`Scene ${i + 1}: render duration ${renderDuration.toFixed(2)}s matches audio (${audioDuration.toFixed(2)}s) ✓`))
+      for (const issue of review.issues) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
       }
-    } catch (err: any) {
-      cb.onLog(info(`Scene ${i + 1}: could not probe render duration — ${err.message}`))
+      // Feed the issues into the next HTML attempt
+      visualFeedback = review.issues
     }
 
-    cb.onProgress(baseProgress + sceneShare * 0.8, `Scene ${i + 1}/${totalScenes}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
+    if (!reviewPassed) {
+      cb.onLog({
+        ts: Date.now(),
+        level: 'warn',
+        message: `Scene ${i + 1}: visual review did not pass after ${MAX_VISUAL_REVIEW_ATTEMPTS} attempts. Using the best output anyway. Remaining issues:`
+      })
+      for (const issue of lastReviewIssues) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
+      }
+    }
+
+    // Mux audio + 1s held-frame tail into the final scene MP4
+    cb.onProgress(
+      baseProgress + sceneShare * 0.85,
+      `Scene ${i + 1}/${totalScenes}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`
+    )
     const finalMp4 = path.join(sceneDir, 'scene.mp4')
     await muxAudioWithVideo(
       {
@@ -161,7 +261,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     )
     const sceneTotalSeconds = audioDuration + SCENE_TAIL_SECONDS
     cb.onLog(info(
-      `✓ Scene ${i + 1}/${totalScenes} saved (${audioDuration.toFixed(2)}s audio + ${SCENE_TAIL_SECONDS.toFixed(1)}s held-frame tail = ${sceneTotalSeconds.toFixed(2)}s) → ${finalMp4}`
+      `✓ Scene ${i + 1}/${totalScenes} saved (${audioDuration.toFixed(2)}s audio + ${SCENE_TAIL_SECONDS.toFixed(1)}s held-frame tail = ${sceneTotalSeconds.toFixed(2)}s, ${visualAttempt} render attempt${visualAttempt === 1 ? '' : 's'}) → ${finalMp4}`
     ))
 
     sceneResults.push({

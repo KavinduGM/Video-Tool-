@@ -275,3 +275,26 @@ function mapTransitionToXfade(t: TransitionType): string | null {
 export function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true })
 }
+
+/**
+ * Extract a single still frame from a rendered MP4 at the given timestamp,
+ * encoded as a JPEG for passing to Claude's vision API. Captures near the end
+ * by default so the composition is in its final, settled state.
+ */
+export async function extractFrame(
+  args: { videoIn: string; atSeconds: number; out: string; quality?: number },
+  onLog?: (l: string) => void
+): Promise<void> {
+  const q = args.quality ?? 3 // 2 = best, 31 = worst; 3 is high quality, small file
+  await runFfmpeg(
+    [
+      '-y',
+      '-ss', args.atSeconds.toFixed(3),
+      '-i', args.videoIn,
+      '-vframes', '1',
+      '-q:v', String(q),
+      args.out
+    ],
+    onLog
+  )
+}
