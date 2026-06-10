@@ -6,8 +6,7 @@ const EMPTY: VoiceProfile = {
   name: '',
   description: '',
   voice_id: '',
-  default_speed: 1.0,
-  default_format: 'mp3'
+  default_speed: 1.0
 }
 
 export default function VoiceProfilesPage(): JSX.Element {
@@ -33,7 +32,7 @@ export default function VoiceProfilesPage(): JSX.Element {
       return
     }
     if (!editing.voice_id.trim()) {
-      setError('voice_id is required so the TTS server knows which voice to speak with.')
+      setError('voice_id is required — paste the ElevenLabs voice ID (from elevenlabs.io → Voices).')
       return
     }
     await window.api.profiles.upsert(editing)
@@ -72,7 +71,7 @@ export default function VoiceProfilesPage(): JSX.Element {
               <span className="muted">— {p.description || 'no description'}</span>
             </div>
             <div className="meta">
-              voice_id: <span className="mono">{p.voice_id}</span> • speed {p.default_speed} • {p.default_format}
+              voice_id: <span className="mono">{p.voice_id}</span> • speed {p.default_speed} • ElevenLabs Turbo v2 (English)
             </div>
           </div>
           <div className="actions">
@@ -111,12 +110,12 @@ export default function VoiceProfilesPage(): JSX.Element {
             </div>
             <div className="row" style={{ marginTop: 10 }}>
               <label className="field grow">
-                voice_id
+                ElevenLabs voice_id
                 <input
                   type="text"
                   value={editing.voice_id}
                   onChange={(e) => setEditing({ ...editing, voice_id: e.target.value })}
-                  placeholder="e6f31a8c4d92"
+                  placeholder="21m00Tcm4TlvDq8ikWAM"
                 />
               </label>
               <label className="field" style={{ width: 140 }}>
@@ -124,26 +123,18 @@ export default function VoiceProfilesPage(): JSX.Element {
                 <input
                   type="number"
                   step="0.05"
-                  min="0.5"
-                  max="2.0"
+                  min="0.7"
+                  max="1.2"
                   value={editing.default_speed}
                   onChange={(e) =>
                     setEditing({ ...editing, default_speed: Number(e.target.value) })
                   }
                 />
               </label>
-              <label className="field" style={{ width: 140 }}>
-                Format
-                <select
-                  value={editing.default_format}
-                  onChange={(e) =>
-                    setEditing({ ...editing, default_format: e.target.value as 'mp3' | 'wav' })
-                  }
-                >
-                  <option value="mp3">mp3</option>
-                  <option value="wav">wav</option>
-                </select>
-              </label>
+            </div>
+            <div className="sub" style={{ marginTop: 6 }}>
+              Output format is locked to MP3 (ElevenLabs Turbo v2 English-only). Speed is clamped to
+              the 0.7–1.2 range the model supports.
             </div>
             <div className="actions">
               <button className="ghost" onClick={() => setEditing(null)}>Cancel</button>

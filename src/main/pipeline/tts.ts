@@ -1,8 +1,20 @@
 import fs from 'node:fs'
 import type { VoiceProfile } from '@shared/types'
 
-interface TtsConfig {
-  baseUrl: string
+/**
+ * ElevenLabs client — locked to the Turbo v2 English-only model per product
+ * requirement. Output is always MP3 (the API's default for this endpoint).
+ */
+
+const ELEVENLABS_BASE = 'https://api.elevenlabs.io'
+const ELEVENLABS_MODEL_ID = 'eleven_turbo_v2' // Turbo v2 English-only
+
+// ElevenLabs voice_settings.speed accepts roughly 0.7–1.2. Clamp here so a stale
+// profile from the old self-hosted server (which allowed 0.5–2.0) doesn't 422.
+const MIN_SPEED = 0.7
+const MAX_SPEED = 1.2
+
+export interface TtsConfig {
   apiKey: string
 }
 
@@ -27,46 +39,59 @@ function unwrapFetchError(err: unknown, url: string): Error {
     if (cause.message) parts.push(cause.message)
   }
   const detail = parts.length ? parts.join(' | ') : String(err)
-  const friendly = friendlyHint(cause?.code, url)
+  const friendly = friendlyHint(cause?.code)
   return new Error(`Network error calling ${url}: ${detail}${friendly ? ` — ${friendly}` : ''}`)
 }
 
-function friendlyHint(code: string | undefined, url: string): string {
+function friendlyHint(code: string | undefined): string {
   switch (code) {
-    case 'ECONNREFUSED':
-      return `nothing is listening at ${url}. Is the TTS server running?`
     case 'ENOTFOUND':
     case 'EAI_AGAIN':
-      return `cannot resolve the hostname. If you're using a Cloudflare Tunnel URL, it may have rotated — restart the tunnel and update Settings → Base URL.`
+      return `cannot resolve api.elevenlabs.io — check your internet connection or DNS.`
     case 'ETIMEDOUT':
-      return `the server didn't respond in time. Check that the TTS server is up and reachable from this PC.`
+      return `ElevenLabs didn't respond in time. Check your connection and retry.`
+    case 'ECONNREFUSED':
+      return `connection refused — likely a proxy/firewall issue between this PC and api.elevenlabs.io.`
     case 'CERT_HAS_EXPIRED':
     case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
-      return `TLS certificate problem — usually a stale tunnel URL.`
-    case 'EPROTO':
-      return `TLS handshake failed — try http:// instead of https:// if hitting localhost.`
+      return `TLS certificate problem — check the system clock and any corporate MITM proxy.`
     default:
       return ''
   }
 }
 
+/**
+ * Hit GET /v1/user as a cheap "is this key valid?" probe. 401 → bad key;
+ * 200 → key is good. We surface the subscription tier so the user can sanity-
+ * check they're hitting the right account.
+ */
 export async function ttsHealth(cfg: TtsConfig): Promise<{ ok: boolean; detail?: string }> {
-  const url = `${cfg.baseUrl.replace(/\/+$/, '')}/api/health`
+  if (!cfg.apiKey) {
+    return { ok: false, detail: 'ElevenLabs API key is empty. Fill it in and save.' }
+  }
+  const url = `${ELEVENLABS_BASE}/v1/user`
   try {
-    const res = await fetch(url, { method: 'GET' })
-    if (!res.ok) return { ok: false, detail: `HTTP ${res.status} from ${url}` }
-    const json = (await res.json()) as { status?: string }
-    return { ok: json.status === 'ok', detail: JSON.stringify(json) }
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'xi-api-key': cfg.apiKey }
+    })
+    if (res.status === 401) {
+      return { ok: false, detail: 'HTTP 401 — the ElevenLabs API key was rejected.' }
+    }
+    if (!res.ok) return { ok: false, detail: `HTTP ${res.status} from ${url}: ${await safeReadText(res)}` }
+    const json = (await res.json()) as { subscription?: { tier?: string } }
+    const tier = json.subscription?.tier ?? 'unknown'
+    return { ok: true, detail: `ElevenLabs key OK (tier: ${tier})` }
   } catch (err: any) {
     return { ok: false, detail: unwrapFetchError(err, url).message }
   }
 }
 
 export async function listVoices(cfg: TtsConfig): Promise<unknown> {
-  const url = `${cfg.baseUrl.replace(/\/+$/, '')}/api/voices`
+  const url = `${ELEVENLABS_BASE}/v1/voices`
   try {
     const res = await fetch(url, {
-      headers: { 'X-API-Key': cfg.apiKey }
+      headers: { 'xi-api-key': cfg.apiKey }
     })
     if (!res.ok) throw new Error(`listVoices failed: ${res.status} ${await safeReadText(res)}`)
     return res.json()
@@ -80,19 +105,34 @@ export interface GenerateArgs {
   text: string
   profile: VoiceProfile
   speedOverride?: number
-  outPath: string
+  outPath: string // expected to end in .mp3 — ElevenLabs Turbo v2 returns MP3
 }
 
 export async function generateAudio(cfg: TtsConfig, args: GenerateArgs): Promise<void> {
-  if (!cfg.baseUrl) {
-    throw new Error('TTS base URL is empty. Open Settings and fill it in.')
+  if (!cfg.apiKey) {
+    throw new Error('ElevenLabs API key is empty. Open Settings and fill it in.')
   }
-  const url = `${cfg.baseUrl.replace(/\/+$/, '')}/api/generate`
-  const form = new FormData()
-  form.set('voice_id', args.profile.voice_id)
-  form.set('text', args.text)
-  form.set('speed', String(args.speedOverride ?? args.profile.default_speed ?? 1.0))
-  form.set('format', args.profile.default_format ?? 'mp3')
+  if (!args.profile.voice_id) {
+    throw new Error(
+      `Voice profile "${args.profile.name}" has no ElevenLabs voice_id. Edit the profile and paste the ID from elevenlabs.io → Voices.`
+    )
+  }
+
+  const url = `${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(args.profile.voice_id)}`
+  const requestedSpeed = args.speedOverride ?? args.profile.default_speed ?? 1.0
+  const speed = clamp(Number(requestedSpeed) || 1.0, MIN_SPEED, MAX_SPEED)
+
+  const body = {
+    text: args.text,
+    model_id: ELEVENLABS_MODEL_ID,
+    voice_settings: {
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0,
+      use_speaker_boost: true,
+      speed
+    }
+  }
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000) // 10 min
@@ -101,8 +141,12 @@ export async function generateAudio(cfg: TtsConfig, args: GenerateArgs): Promise
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'X-API-Key': cfg.apiKey },
-        body: form,
+        headers: {
+          'xi-api-key': cfg.apiKey,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg'
+        },
+        body: JSON.stringify(body),
         signal: controller.signal
       })
     } catch (err: any) {
@@ -110,13 +154,25 @@ export async function generateAudio(cfg: TtsConfig, args: GenerateArgs): Promise
     }
     if (!res.ok) {
       const detail = await safeReadText(res)
-      throw new Error(`TTS server returned HTTP ${res.status} from ${url}: ${detail.slice(0, 500)}`)
+      const hint =
+        res.status === 401
+          ? ' — the ElevenLabs API key was rejected.'
+          : res.status === 422
+          ? ' — request was malformed; check the voice_id and that this voice supports Turbo v2.'
+          : res.status === 429
+          ? ' — ElevenLabs rate limit / character quota exceeded.'
+          : ''
+      throw new Error(`ElevenLabs returned HTTP ${res.status} from ${url}: ${detail.slice(0, 500)}${hint}`)
     }
     const buf = Buffer.from(await res.arrayBuffer())
     await fs.promises.writeFile(args.outPath, buf)
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n))
 }
 
 async function safeReadText(res: Response): Promise<string> {

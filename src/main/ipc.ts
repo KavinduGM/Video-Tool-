@@ -22,11 +22,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.PROFILES_LIST, () => listProfiles())
   ipcMain.handle(IPC.PROFILES_UPSERT, (_e, raw: VoiceProfile) => {
+    // ElevenLabs Turbo v2 honors voice_settings.speed in the 0.7–1.2 range —
+    // anything outside that is silently ignored server-side, so clamp here so
+    // the saved value matches what the API will actually use.
     const profile: VoiceProfile = {
       ...raw,
       id: raw.id || randomUUID(),
-      default_speed: clamp(Number(raw.default_speed) || 1.0, 0.5, 2.0),
-      default_format: raw.default_format === 'wav' ? 'wav' : 'mp3'
+      default_speed: clamp(Number(raw.default_speed) || 1.0, 0.7, 1.2)
     }
     return upsertProfile(profile)
   })
@@ -137,12 +139,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.TTS_HEALTH, async () => {
     const s = getSettings()
-    return ttsHealth({ baseUrl: s.tts_base_url, apiKey: s.tts_api_key })
+    return ttsHealth({ apiKey: s.elevenlabs_api_key })
   })
 
   ipcMain.handle(IPC.TTS_VOICES, async () => {
     const s = getSettings()
-    return listVoices({ baseUrl: s.tts_base_url, apiKey: s.tts_api_key })
+    return listVoices({ apiKey: s.elevenlabs_api_key })
   })
 
   worker.on('event', (event: QueueEvent) => {

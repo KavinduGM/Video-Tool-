@@ -57,16 +57,14 @@ export interface VoiceProfile {
   id: string
   name: string
   description: string
-  voice_id: string
-  default_speed: number
-  default_format: 'mp3' | 'wav'
+  voice_id: string // ElevenLabs voice ID
+  default_speed: number // ElevenLabs supports 0.7–1.2 on Turbo v2
 }
 
 export interface AppSettings {
   anthropic_api_key: string
   claude_model: string
-  tts_base_url: string
-  tts_api_key: string
+  elevenlabs_api_key: string
   default_output_folder: string
   hyperframes_command: string // e.g. "npx hyperframes" or absolute path
 }

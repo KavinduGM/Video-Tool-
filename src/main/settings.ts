@@ -6,8 +6,7 @@ import type { AppSettings, VoiceProfile } from '@shared/types'
 const DEFAULT_SETTINGS: AppSettings = {
   anthropic_api_key: '',
   claude_model: 'claude-opus-4-7',
-  tts_base_url: 'http://localhost:8000',
-  tts_api_key: '',
+  elevenlabs_api_key: '',
   default_output_folder: '',
   hyperframes_command: 'npx hyperframes'
 }
@@ -33,8 +32,32 @@ function getStore(): Store<SchemaShape> {
   return store
 }
 
+/**
+ * Read settings, migrating any pre-ElevenLabs shape on the fly. Old installs had
+ * `tts_base_url` / `tts_api_key` from the self-hosted voice-clone server; we drop
+ * the URL entirely and, if the user never set the new ElevenLabs key, seed it
+ * from the old TTS key so they don't lose their input on first launch. The
+ * persisted shape is rewritten so the migration only runs once.
+ */
 export function getSettings(): AppSettings {
-  return getStore().get('settings')
+  const raw = getStore().get('settings') as AppSettings & {
+    tts_base_url?: string
+    tts_api_key?: string
+  }
+  const needsMigration =
+    raw.elevenlabs_api_key === undefined ||
+    raw.tts_base_url !== undefined ||
+    raw.tts_api_key !== undefined
+  if (!needsMigration) return raw
+  const migrated: AppSettings = {
+    anthropic_api_key: raw.anthropic_api_key ?? '',
+    claude_model: raw.claude_model ?? DEFAULT_SETTINGS.claude_model,
+    elevenlabs_api_key: raw.elevenlabs_api_key || raw.tts_api_key || '',
+    default_output_folder: raw.default_output_folder ?? '',
+    hyperframes_command: raw.hyperframes_command ?? DEFAULT_SETTINGS.hyperframes_command
+  }
+  getStore().set('settings', migrated)
+  return migrated
 }
 
 export function setSettings(patch: Partial<AppSettings>): AppSettings {

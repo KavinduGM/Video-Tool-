@@ -28,8 +28,8 @@ export interface RunnerCallbacks {
 export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled: boolean }): Promise<string> {
   const settings = getSettings()
   if (!settings.anthropic_api_key) throw new Error('Anthropic API key is missing in Settings.')
-  if (!settings.tts_base_url || !settings.tts_api_key) {
-    throw new Error('TTS base URL or API key is missing in Settings.')
+  if (!settings.elevenlabs_api_key) {
+    throw new Error('ElevenLabs API key is missing in Settings.')
   }
 
   const spec = parseScript(job.script_yaml)
@@ -68,11 +68,11 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     const baseProgress = i * sceneShare
 
     cb.onProgress(baseProgress + sceneShare * 0.0, `Scene ${i + 1}/${totalScenes}: generating audio`)
-    cb.onLog(info(`Scene ${i + 1}: generating audio (voice=${profile.name})`))
-    const audioFmt = profile.default_format ?? 'mp3'
-    const audioPath = path.join(sceneDir, `audio.${audioFmt}`)
+    cb.onLog(info(`Scene ${i + 1}: generating audio with ElevenLabs Turbo v2 (voice=${profile.name})`))
+    // ElevenLabs Turbo v2 returns MP3 — hardcode the extension to match.
+    const audioPath = path.join(sceneDir, `audio.mp3`)
     await generateAudio(
-      { baseUrl: settings.tts_base_url, apiKey: settings.tts_api_key },
+      { apiKey: settings.elevenlabs_api_key },
       {
         text: scene.voiceover,
         profile,

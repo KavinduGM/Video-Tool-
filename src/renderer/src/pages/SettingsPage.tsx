@@ -72,24 +72,20 @@ export default function SettingsPage(): JSX.Element {
       </div>
 
       <div className="card">
-        <h3>Voice / TTS server</h3>
+        <h3>ElevenLabs</h3>
+        <div className="sub" style={{ marginBottom: 8 }}>
+          Voice generation uses the <strong>Turbo v2 (English-only)</strong> model. Get your API key
+          from <span className="code-inline">elevenlabs.io → Profile → API Keys</span>, and grab voice IDs
+          from <span className="code-inline">Voices → (voice) → ID</span> to plug into Voice profiles.
+        </div>
         <div className="row">
-          <label className="field grow">
-            Base URL
-            <input
-              type="text"
-              value={settings.tts_base_url}
-              onChange={(e) => update('tts_base_url', e.target.value)}
-              placeholder="http://localhost:8000 or https://…trycloudflare.com"
-            />
-          </label>
           <label className="field grow">
             API key
             <input
               type="password"
-              value={settings.tts_api_key}
-              onChange={(e) => update('tts_api_key', e.target.value)}
-              placeholder="vct_…"
+              value={settings.elevenlabs_api_key}
+              onChange={(e) => update('elevenlabs_api_key', e.target.value)}
+              placeholder="sk_…"
             />
           </label>
         </div>
@@ -99,7 +95,7 @@ export default function SettingsPage(): JSX.Element {
           </button>
           {ttsCheck && (
             <div className={`banner ${ttsCheck.ok ? 'ok' : 'err'}`} style={{ margin: 0 }}>
-              {ttsCheck.ok ? 'TTS server is healthy.' : `Failed: ${ttsCheck.detail}`}
+              {ttsCheck.ok ? (ttsCheck.detail ?? 'ElevenLabs key OK.') : `Failed: ${ttsCheck.detail}`}
             </div>
           )}
         </div>
