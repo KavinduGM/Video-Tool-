@@ -65,7 +65,7 @@ export default function SettingsPage(): JSX.Element {
               type="text"
               value={settings.claude_model}
               onChange={(e) => update('claude_model', e.target.value)}
-              placeholder="claude-opus-4-7"
+              placeholder="claude-opus-4-8"
             />
           </label>
         </div>

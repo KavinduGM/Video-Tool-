@@ -5,7 +5,7 @@ import type { AppSettings, VoiceProfile } from '@shared/types'
 
 const DEFAULT_SETTINGS: AppSettings = {
   anthropic_api_key: '',
-  claude_model: 'claude-opus-4-7',
+  claude_model: 'claude-opus-4-8',
   elevenlabs_api_key: '',
   default_output_folder: '',
   hyperframes_command: 'npx hyperframes'

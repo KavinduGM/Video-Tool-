@@ -641,8 +641,13 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const userPrompt = buildUserPromptForAttempt(args, attempt, lastReason)
 
-    const resp = await client.messages.create({
-      model: args.model || 'claude-opus-4-7',
+    // We MUST stream here. With max_tokens this high, a single non-streaming
+    // call could exceed the SDK's 10-minute request guard, which makes the SDK
+    // refuse the request outright ("Streaming is strongly recommended…"). Using
+    // the streaming API and awaiting the final assembled message both satisfies
+    // that guard and avoids socket idle-timeouts on long dense-scene generations.
+    const stream = client.messages.stream({
+      model: args.model || 'claude-opus-4-8',
       // Dense scenes (6+ steps, letter-by-letter spans) generate a LOT of HTML.
       // 16k was truncating the densest scenes mid-document, leaving only the
       // first element built and the rest never revealed. 32k gives ample room.
@@ -650,6 +655,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }]
     })
+    const resp = await stream.finalMessage()
 
     const text = resp.content
       .filter((b) => b.type === 'text')
@@ -895,7 +901,7 @@ export async function reviewScene(args: ReviewSceneArgs): Promise<VisualReviewRe
   const mediaType = /\.png$/i.test(args.framePath) ? 'image/png' : 'image/jpeg'
 
   const resp = await client.messages.create({
-    model: args.model || 'claude-opus-4-7',
+    model: args.model || 'claude-opus-4-8',
     max_tokens: 1500,
     system: REVIEWER_SYSTEM,
     messages: [
