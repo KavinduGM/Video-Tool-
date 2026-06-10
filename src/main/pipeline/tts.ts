@@ -61,30 +61,69 @@ function friendlyHint(code: string | undefined): string {
 }
 
 /**
- * Hit GET /v1/user as a cheap "is this key valid?" probe. 401 → bad key;
- * 200 → key is good. We surface the subscription tier so the user can sanity-
- * check they're hitting the right account.
+ * Probe order matters: ElevenLabs API keys now have granular scopes
+ * (text_to_speech / voices_read / user_read / models_read / …). A key created
+ * with the default "Restricted" preset will 401 on /v1/user even though it
+ * works fine for TTS. So we try, in order, the endpoints that progressively
+ * fewer keys can reach, and accept the first 2xx:
+ *   1. /v1/voices  — needs voices_read (commonly granted, lets us also surface voice count)
+ *   2. /v1/models  — needs models_read
+ *   3. /v1/user    — needs user_read (lets us surface the subscription tier)
+ * If ALL three 401, it's almost certainly a permissions problem rather than a
+ * bad key — we say so explicitly so the user knows what to fix.
  */
 export async function ttsHealth(cfg: TtsConfig): Promise<{ ok: boolean; detail?: string }> {
   if (!cfg.apiKey) {
     return { ok: false, detail: 'ElevenLabs API key is empty. Fill it in and save.' }
   }
-  const url = `${ELEVENLABS_BASE}/v1/user`
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'xi-api-key': cfg.apiKey }
-    })
-    if (res.status === 401) {
-      return { ok: false, detail: 'HTTP 401 — the ElevenLabs API key was rejected.' }
+  const headers = { 'xi-api-key': cfg.apiKey }
+  const probes: { url: string; describe: (json: any) => string }[] = [
+    {
+      url: `${ELEVENLABS_BASE}/v1/voices`,
+      describe: (j) =>
+        `ElevenLabs key OK — ${Array.isArray(j?.voices) ? j.voices.length : '?'} voice(s) available.`
+    },
+    {
+      url: `${ELEVENLABS_BASE}/v1/models`,
+      describe: (j) =>
+        `ElevenLabs key OK — ${Array.isArray(j) ? j.length : '?'} model(s) available (voices_read scope not granted, so voice listing is disabled).`
+    },
+    {
+      url: `${ELEVENLABS_BASE}/v1/user`,
+      describe: (j) => `ElevenLabs key OK (tier: ${j?.subscription?.tier ?? 'unknown'}).`
     }
-    if (!res.ok) return { ok: false, detail: `HTTP ${res.status} from ${url}: ${await safeReadText(res)}` }
-    const json = (await res.json()) as { subscription?: { tier?: string } }
-    const tier = json.subscription?.tier ?? 'unknown'
-    return { ok: true, detail: `ElevenLabs key OK (tier: ${tier})` }
-  } catch (err: any) {
-    return { ok: false, detail: unwrapFetchError(err, url).message }
+  ]
+
+  let saw401 = false
+  let lastFailureDetail = ''
+  for (const probe of probes) {
+    try {
+      const res = await fetch(probe.url, { method: 'GET', headers })
+      if (res.ok) {
+        const json = await res.json().catch(() => ({}))
+        return { ok: true, detail: probe.describe(json) }
+      }
+      if (res.status === 401) {
+        saw401 = true
+        // Try the next probe — this key just lacks this scope.
+        continue
+      }
+      lastFailureDetail = `HTTP ${res.status} from ${probe.url}: ${(await safeReadText(res)).slice(0, 300)}`
+      // Non-401 failure — return immediately; trying further endpoints won't help.
+      return { ok: false, detail: lastFailureDetail }
+    } catch (err: any) {
+      return { ok: false, detail: unwrapFetchError(err, probe.url).message }
+    }
   }
+
+  if (saw401) {
+    return {
+      ok: false,
+      detail:
+        'HTTP 401 on every probe endpoint. The key is recognized but has no readable scopes — make sure it has at least Text-to-Speech + Voices permission (elevenlabs.io → Profile → API Keys → edit → "Has access to all").'
+    }
+  }
+  return { ok: false, detail: lastFailureDetail || 'ElevenLabs health probe failed for an unknown reason.' }
 }
 
 export async function listVoices(cfg: TtsConfig): Promise<unknown> {
