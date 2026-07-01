@@ -118,7 +118,14 @@ Step 3 (MIDDLE band): white line writes in ...
 Step 4 (BOTTOM band, CENTER): yellow line writes in ...
 ```
 
-If you don't name bands, the lines are simply stacked and centered inside the safe area — still never cropped. The generator emits a required `#stage > .safe` scaffold pinned to those margins, and the visual reviewer **fails** any frame where text touches or crosses a strict margin. The grid is tuned specifically for 9:16; other ratios fall back to the generic layout rules.
+If you don't name bands, the lines are simply stacked and centered inside the safe area — still never cropped. The grid is tuned specifically for 9:16; other ratios fall back to the generic layout rules.
+
+**How it's actually enforced (deterministic, not just advice):** after Claude generates a scene's HTML, the app loads it in a hidden 1080×1920 browser window, jumps the animation to its final frame, and measures the real pixel bounding box of every visible element. If anything crosses the safe area, the app:
+
+1. **Retries** generation with the exact pixel overflow and the offending text, so Claude fixes it at full size (it usually does), then
+2. On the final attempt, applies a **geometric force-fit** — a measured `scale`+`translate` that maps the content box precisely inside the safe area — so the exported video is **guaranteed** never cropped, regardless of what Claude produced.
+
+This runs only for 9:16 and only adds work when a scene actually overflows. If the measurement can't run for some reason, the pipeline falls back to the prompt + visual-reviewer safeguards and logs that it did so.
 
 ### Scene length matters
 

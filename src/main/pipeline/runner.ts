@@ -128,6 +128,19 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           message: `${tag}: animation-coverage validation failed after ${claudeResult.attempts} HTML attempts — proceeding with the best output.`
         })
       }
+      if (claudeResult.safeZone === 'force-fitted') {
+        cb.onLog({
+          ts: Date.now(),
+          level: 'warn',
+          message: `${tag}: content exceeded the 9:16 safe zone — applied a deterministic geometric fit so the export stays inside the safe area.`
+        })
+      } else if (claudeResult.safeZone === 'skipped') {
+        cb.onLog({
+          ts: Date.now(),
+          level: 'warn',
+          message: `${tag}: safe-zone measurement was unavailable — relying on the prompt/reviewer safeguards for this scene.`
+        })
+      }
       if (claudeResult.sanitized.length > 0) {
         cb.onLog(info(`${tag}: sanitized ${claudeResult.sanitized.length} looping construct(s):`))
         for (const note of claudeResult.sanitized) cb.onLog(info(`  - ${note}`))

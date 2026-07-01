@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
 import { zoneGuideForPrompt, zoneGuideForReviewer } from '@shared/zones'
+import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback } from './safezone'
 
 export interface SceneRenderArgs {
   apiKey: string
@@ -425,6 +426,8 @@ export interface SceneHtmlResult {
   attempts: number
   validationStatus: 'passed' | 'failed-after-retries'
   validationLog: string[]
+  /** 9:16 safe-zone outcome: 'ok' inside, 'force-fitted' geometrically corrected, 'skipped' not measured, 'n/a' non-9:16 */
+  safeZone: 'ok' | 'force-fitted' | 'skipped' | 'n/a'
 }
 
 export interface AnimationTiming {
@@ -711,15 +714,52 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
 
     if (validation.ok) {
       log.push(
-        `attempt ${attempt}/${MAX_ATTEMPTS}: passed (last start t=${validation.maxStartSeconds.toFixed(2)}s, latest end t=${validation.maxEndSeconds.toFixed(2)}s, ${validation.found} timed reveals)`
+        `attempt ${attempt}/${MAX_ATTEMPTS}: animation-coverage passed (last start t=${validation.maxStartSeconds.toFixed(2)}s, latest end t=${validation.maxEndSeconds.toFixed(2)}s, ${validation.found} timed reveals)`
       )
-      return {
-        html: cleanHtml,
-        sanitized,
-        attempts: attempt,
-        validationStatus: 'passed',
-        validationLog: log
+
+      // -------- Deterministic 9:16 safe-zone enforcement --------
+      // Measure the real geometry of the rendered HTML. On overflow: retry with
+      // exact pixel feedback (Claude usually fixes it at full size); on the LAST
+      // attempt, apply a guaranteed geometric force-fit so the export is never
+      // cropped. Non-9:16 scenes skip this entirely.
+      if (args.ratio === '9:16') {
+        const isFinalAttempt = attempt === MAX_ATTEMPTS
+        const measurement = await measureSafeZone(cleanHtml, args.durationSeconds)
+
+        if (!measurement.measured) {
+          log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone measurement skipped (${measurement.note ?? 'unavailable'})`)
+          return finalize(cleanHtml, sanitized, attempt, 'passed', 'skipped', log)
+        }
+
+        if (measurement.ok) {
+          const c = measurement.content!
+          log.push(
+            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}] inside safe area)`
+          )
+          return finalize(cleanHtml, sanitized, attempt, 'passed', 'ok', log)
+        }
+
+        // Overflow detected.
+        if (!isFinalAttempt) {
+          lastReason = safeZoneFeedback(measurement)
+          lastHtml = cleanHtml
+          const sides = Object.entries(measurement.overflow)
+            .filter(([, v]) => v > 1)
+            .map(([k, v]) => `${k} +${Math.round(v)}px`)
+            .join(', ')
+          log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${sides}) — regenerating with exact feedback`)
+          continue
+        }
+
+        // Final attempt still overflows → guarantee correctness geometrically.
+        const fit = fitHtmlToSafeZone(cleanHtml, measurement)
+        log.push(
+          `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone still violated after ${MAX_ATTEMPTS} attempts — applied geometric force-fit (scale ${fit.scale.toFixed(3)}) so nothing is cropped`
+        )
+        return finalize(fit.fitted ? fit.html : cleanHtml, sanitized, attempt, 'passed', 'force-fitted', log)
       }
+
+      return finalize(cleanHtml, sanitized, attempt, 'passed', 'n/a', log)
     }
 
     lastReason = validation.reason ?? 'unknown failure'
@@ -736,13 +776,41 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
     )
   }
 
+  // Ran out of attempts on a non-safe-zone failure. For 9:16, still guarantee the
+  // export is inside the safe area by force-fitting the best HTML we have.
+  let outHtml = lastHtml
+  let safeZone: SceneHtmlResult['safeZone'] = 'n/a'
+  if (args.ratio === '9:16') {
+    const measurement = await measureSafeZone(lastHtml, args.durationSeconds)
+    if (measurement.measured && !measurement.ok) {
+      const fit = fitHtmlToSafeZone(lastHtml, measurement)
+      outHtml = fit.fitted ? fit.html : lastHtml
+      safeZone = 'force-fitted'
+      log.push(`final: applied geometric safe-zone force-fit (scale ${fit.scale.toFixed(3)})`)
+    } else {
+      safeZone = measurement.measured ? 'ok' : 'skipped'
+    }
+  }
+
   return {
-    html: lastHtml,
+    html: outHtml,
     sanitized: lastSanitized,
     attempts: MAX_ATTEMPTS,
     validationStatus: 'failed-after-retries',
-    validationLog: log
+    validationLog: log,
+    safeZone
   }
+}
+
+function finalize(
+  html: string,
+  sanitized: string[],
+  attempts: number,
+  validationStatus: SceneHtmlResult['validationStatus'],
+  safeZone: SceneHtmlResult['safeZone'],
+  validationLog: string[]
+): SceneHtmlResult {
+  return { html, sanitized, attempts, validationStatus, validationLog, safeZone }
 }
 
 function buildUserPromptForAttempt(
@@ -768,19 +836,31 @@ function buildUserPromptForAttempt(
 
   if (attempt === 1) return basePrompt
 
+  // The retry reason may be about animation coverage, truncation, OR the
+  // deterministic safe-zone measurement. Lead with the exact reason (it already
+  // contains the specifics and, for safe-zone, precise pixel numbers), then add
+  // the relevant reminders.
+  const isSafeZone = /SAFE ZONE/i.test(prevReason)
   const minRequired = Math.max(0.5, args.durationSeconds - 2.0)
+  const reminders = isSafeZone
+    ? `You MUST fix this in this attempt:\n` +
+      `  - Move/shrink the named elements so EVERY element is fully inside the safe area\n` +
+      `    x[${'60'}, ${'1020'}] y[${'160'}, ${'1680'}]. Reduce font-size before anything else.\n` +
+      `  - Keep all content inside the required #stage > .safe scaffold; nothing may extend past it.\n` +
+      `  - Do not let any single line get wider than 960px — shrink the font until it fits.\n`
+    : `You MUST fix this in this attempt:\n` +
+      `  - The LAST visible animation start time MUST be ≥ ${minRequired.toFixed(2)}s\n` +
+      `    (we measure this by scanning the HTML for CSS animation-delay,\n` +
+      `     GSAP positional args, SVG begin=, and delay: properties).\n` +
+      `  - Spread your animations across the full ${args.durationSeconds.toFixed(2)}s duration.\n` +
+      `  - Every visible item from the explainer is its own DOM element with its own staggered start time.\n` +
+      `  - Do NOT cluster all reveals into the first few seconds.\n`
   return (
     basePrompt +
     `\n\n---\n` +
     `RETRY — your previous attempt failed automated validation:\n\n` +
     `  ${prevReason}\n\n` +
-    `You MUST fix this in this attempt:\n` +
-    `  - The LAST visible animation start time MUST be ≥ ${minRequired.toFixed(2)}s\n` +
-    `    (we measure this by scanning the HTML for CSS animation-delay,\n` +
-    `     GSAP positional args, SVG begin=, and delay: properties).\n` +
-    `  - Spread your animations across the full ${args.durationSeconds.toFixed(2)}s duration.\n` +
-    `  - Every visible item from the explainer is its own DOM element with its own staggered start time.\n` +
-    `  - Do NOT cluster all reveals into the first few seconds.\n` +
+    reminders +
     `Return ONLY the corrected complete HTML document.`
   )
 }
