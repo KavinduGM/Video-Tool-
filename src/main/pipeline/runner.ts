@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Job, JobLogEntry } from '@shared/types'
 import { parseScript, dimensionsForRatio } from './parser'
-import { generateSceneHtml, reviewScene } from './claude'
+import { generateSceneHtml, reviewScene, repairSceneHtml } from './claude'
 import { generateAudio } from './tts'
 import { scaffoldProject, renderHyperframes } from './hyperframes'
 import {
@@ -14,7 +14,10 @@ import {
 } from './ffmpeg'
 import { getSettings, findProfileByName, getStoragePaths } from '../settings'
 
-const MAX_VISUAL_REVIEW_ATTEMPTS = 3
+const MAX_VISUAL_REVIEW_ATTEMPTS = 10
+// Stop early if repairs stop reducing the issue count for this many consecutive
+// attempts — burning renders/credits on an oscillating fix helps nobody.
+const MAX_NO_PROGRESS = 2
 
 export interface RunnerHandle {
   cancel(): void
@@ -85,179 +88,168 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     cb.onLog(info(`Scene ${i + 1}: audio is ${audioDuration.toFixed(2)}s`))
     if (handle.cancelled) throw new Error('Cancelled')
 
-    // ---------- Generate → render → visual-review loop ----------
-    // Up to MAX_VISUAL_REVIEW_ATTEMPTS times, generate HTML, render via
-    // Hyperframes, extract a representative frame, and ask Claude (with
-    // vision) to verify the frame matches the explainer. On failure, the
-    // reviewer's issues feed into the next HTML attempt.
-    const rawMp4 = path.join(sceneDir, 'render.mp4')
+    // ---------- Generate → render → visual-review → SURGICAL REPAIR loop ----------
+    // Attempt 1 generates the full HTML. After that, instead of regenerating the
+    // whole scene (which is expensive and tends to introduce brand-new issues
+    // while fixing one), we ask Claude for MINIMAL find/replace edits targeting
+    // only the reviewer's issues, and apply them deterministically — the rest of
+    // the HTML stays byte-for-byte identical. We keep the version with the FEWEST
+    // issues and DISCARD any repair that regresses, so a fix can never make the
+    // scene worse. Up to MAX_VISUAL_REVIEW_ATTEMPTS, stopping early on a clean
+    // pass or when repairs stop making progress.
     const projectDir = path.join(sceneDir, 'hyperframes')
-    let html = ''
-    let visualFeedback: string[] = []
-    let reviewPassed = false
-    let lastReviewIssues: string[] = []
-    let visualAttempt = 0
 
-    while (visualAttempt < MAX_VISUAL_REVIEW_ATTEMPTS) {
-      visualAttempt++
-      const tag = `Scene ${i + 1} attempt ${visualAttempt}/${MAX_VISUAL_REVIEW_ATTEMPTS}`
-
-      cb.onProgress(
-        baseProgress + sceneShare * 0.2,
-        `${tag}: composing HTML with Claude`
-      )
-      cb.onLog(info(`${tag}: asking Claude (${settings.claude_model}) for HTML${visualFeedback.length ? ` with ${visualFeedback.length} reviewer issue(s) to fix` : ''}`))
-      const claudeResult = await generateSceneHtml({
-        apiKey: settings.anthropic_api_key,
-        model: settings.claude_model,
-        ratio: spec.ratio,
-        durationSeconds: audioDuration,
-        sceneIndex: i,
-        totalScenes,
-        explainer: scene.explainer,
-        voiceover: scene.voiceover,
-        style: spec.style,
-        visualFeedback: visualFeedback.length ? visualFeedback : undefined
-      })
-      html = claudeResult.html
-      for (const line of claudeResult.validationLog) cb.onLog(info(`${tag}: ${line}`))
-      if (claudeResult.validationStatus === 'failed-after-retries') {
-        cb.onLog({
-          ts: Date.now(),
-          level: 'warn',
-          message: `${tag}: animation-coverage validation failed after ${claudeResult.attempts} HTML attempts — proceeding with the best output.`
-        })
-      }
-      if (claudeResult.safeZone === 'force-fitted') {
-        cb.onLog({
-          ts: Date.now(),
-          level: 'warn',
-          message: `${tag}: content exceeded the 9:16 safe zone — applied a deterministic geometric fit so the export stays inside the safe area.`
-        })
-      } else if (claudeResult.safeZone === 'skipped') {
-        cb.onLog({
-          ts: Date.now(),
-          level: 'warn',
-          message: `${tag}: safe-zone measurement was unavailable — relying on the prompt/reviewer safeguards for this scene.`
-        })
-      }
-      if (claudeResult.sanitized.length > 0) {
-        cb.onLog(info(`${tag}: sanitized ${claudeResult.sanitized.length} looping construct(s):`))
-        for (const note of claudeResult.sanitized) cb.onLog(info(`  - ${note}`))
-      }
-
-      // Render the HTML
-      await scaffoldProject(projectDir, html)
+    // Render one HTML to its own mp4 and review the final frame → issue list.
+    async function renderAndReview(
+      htmlStr: string,
+      tag: string,
+      idx: number
+    ): Promise<{ mp4: string; issues: string[]; reviewed: boolean }> {
+      await scaffoldProject(projectDir, htmlStr)
       if (handle.cancelled) throw new Error('Cancelled')
-
-      cb.onProgress(
-        baseProgress + sceneShare * 0.4,
-        `${tag}: rendering with Hyperframes`
-      )
+      const mp4 = path.join(sceneDir, `render_${idx}.mp4`)
+      cb.onProgress(baseProgress + sceneShare * 0.4, `${tag}: rendering with Hyperframes`)
       await renderHyperframes({
         command: settings.hyperframes_command,
         projectDir,
-        outputMp4: rawMp4,
+        outputMp4: mp4,
         onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
       })
       if (handle.cancelled) throw new Error('Cancelled')
 
-      // Render duration sanity check (informational only — doesn't trigger retry on its own)
       try {
-        const renderDuration = await probeDurationSeconds(rawMp4)
+        const renderDuration = await probeDurationSeconds(mp4)
         const diff = renderDuration - audioDuration
         if (Math.abs(diff) > 0.5) {
-          cb.onLog(info(
-            `${tag}: WARNING — Hyperframes rendered ${renderDuration.toFixed(2)}s, audio is ${audioDuration.toFixed(2)}s (diff ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}s).`
-          ))
-        } else {
-          cb.onLog(info(`${tag}: render duration ${renderDuration.toFixed(2)}s matches audio (${audioDuration.toFixed(2)}s) ✓`))
+          cb.onLog(info(`${tag}: WARNING — rendered ${renderDuration.toFixed(2)}s vs audio ${audioDuration.toFixed(2)}s (diff ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}s).`))
         }
-      } catch (err: any) {
-        cb.onLog(info(`${tag}: could not probe render duration — ${err.message}`))
+      } catch {
+        /* non-fatal */
       }
 
-      // Extract the final frame for visual review
-      cb.onProgress(
-        baseProgress + sceneShare * 0.6,
-        `${tag}: visual review (frame extraction)`
-      )
-      const reviewFramePath = path.join(sceneDir, `review_attempt_${visualAttempt}.jpg`)
-      // Grab the genuine LAST frame of the raw render — that's what the viewer sees
-      // at the end of the scene, and it's where animation-cutoff defects show. A
-      // 50 ms offset just keeps ffmpeg from seeking past EOF on edge-case durations.
+      cb.onProgress(baseProgress + sceneShare * 0.6, `${tag}: visual review (frame extraction)`)
+      const framePath = path.join(sceneDir, `review_${idx}.jpg`)
       const grabAt = Math.max(0.1, audioDuration - 0.05)
       try {
-        await extractFrame(
-          { videoIn: rawMp4, atSeconds: grabAt, out: reviewFramePath, quality: 3 },
-          (line) => cb.onLog(info(`ffmpeg: ${line}`))
-        )
+        await extractFrame({ videoIn: mp4, atSeconds: grabAt, out: framePath, quality: 3 }, (line) => cb.onLog(info(`ffmpeg: ${line}`)))
       } catch (err: any) {
-        cb.onLog({
-          ts: Date.now(),
-          level: 'warn',
-          message: `${tag}: frame extraction failed (${err.message}) — skipping visual review for this attempt.`
-        })
-        // Treat as pass so we proceed; no point retrying without a frame to compare.
-        reviewPassed = true
-        lastReviewIssues = []
-        break
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: frame extraction failed (${err.message}) — accepting this render.` })
+        return { mp4, issues: [], reviewed: false }
       }
 
-      cb.onProgress(
-        baseProgress + sceneShare * 0.65,
-        `${tag}: visual review (Claude vision)`
-      )
-      cb.onLog(info(`${tag}: visual review — comparing rendered frame to explainer`))
-      let review
+      cb.onProgress(baseProgress + sceneShare * 0.65, `${tag}: visual review (Claude vision)`)
       try {
-        review = await reviewScene({
+        const review = await reviewScene({
           apiKey: settings.anthropic_api_key,
           model: settings.claude_model,
-          framePath: reviewFramePath,
+          framePath,
           explainer: scene.explainer,
           ratio: spec.ratio
         })
+        return { mp4, issues: review.pass ? [] : review.issues, reviewed: true }
       } catch (err: any) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: visual review call failed (${err.message}) — accepting this render.` })
+        return { mp4, issues: [], reviewed: false }
+      }
+    }
+
+    // Attempt 1 — full generation.
+    cb.onProgress(baseProgress + sceneShare * 0.2, `Scene ${i + 1}: composing HTML with Claude`)
+    cb.onLog(info(`Scene ${i + 1}: asking Claude (${settings.claude_model}) for HTML`))
+    const gen = await generateSceneHtml({
+      apiKey: settings.anthropic_api_key,
+      model: settings.claude_model,
+      ratio: spec.ratio,
+      durationSeconds: audioDuration,
+      sceneIndex: i,
+      totalScenes,
+      explainer: scene.explainer,
+      voiceover: scene.voiceover,
+      style: spec.style
+    })
+    for (const line of gen.validationLog) cb.onLog(info(`Scene ${i + 1}: ${line}`))
+    if (gen.validationStatus === 'failed-after-retries') {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Scene ${i + 1}: animation-coverage validation failed after ${gen.attempts} attempts — proceeding with best output.` })
+    }
+    if (gen.safeZone === 'force-fitted') {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Scene ${i + 1}: content exceeded the 9:16 safe zone — applied a deterministic geometric fit.` })
+    }
+    if (gen.sanitized.length > 0) {
+      cb.onLog(info(`Scene ${i + 1}: sanitized ${gen.sanitized.length} looping construct(s).`))
+    }
+
+    const first = await renderAndReview(gen.html, `Scene ${i + 1} attempt 1/${MAX_VISUAL_REVIEW_ATTEMPTS}`, 1)
+    let best = { html: gen.html, mp4: first.mp4, issues: first.issues }
+    let attempt = 1
+    let noProgress = 0
+
+    if (best.issues.length === 0) {
+      cb.onLog(info(`Scene ${i + 1}: visual review PASSED ✓ on first render`))
+    } else {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Scene ${i + 1} attempt 1: ${best.issues.length} issue(s):` })
+      for (const issue of best.issues) cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
+    }
+
+    while (attempt < MAX_VISUAL_REVIEW_ATTEMPTS && best.issues.length > 0 && !handle.cancelled) {
+      attempt++
+      const tag = `Scene ${i + 1} repair ${attempt}/${MAX_VISUAL_REVIEW_ATTEMPTS}`
+      cb.onProgress(baseProgress + sceneShare * 0.2, `${tag}: targeted fix (${best.issues.length} issue(s))`)
+      cb.onLog(info(`${tag}: requesting surgical edits for ${best.issues.length} issue(s) — patching only the affected parts, not a full rewrite`))
+
+      const repaired = await repairSceneHtml({
+        apiKey: settings.anthropic_api_key,
+        model: settings.claude_model,
+        html: best.html,
+        issues: best.issues,
+        explainer: scene.explainer,
+        ratio: spec.ratio,
+        durationSeconds: audioDuration
+      })
+      for (const line of repaired.log) cb.onLog(info(`${tag}: ${line}`))
+
+      if (repaired.applied === 0) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: no edits could be applied — keeping the current best and stopping repairs.` })
+        break
+      }
+
+      const rr = await renderAndReview(repaired.html, tag, attempt)
+
+      if (rr.issues.length === 0) {
+        cb.onLog(info(`${tag}: visual review PASSED ✓ (resolved with ${repaired.applied} targeted edit(s), no full rewrite)`))
+        best = { html: repaired.html, mp4: rr.mp4, issues: [] }
+        break
+      }
+
+      if (rr.issues.length < best.issues.length) {
+        cb.onLog(info(`${tag}: progress — issues ${best.issues.length} → ${rr.issues.length}; keeping this version`))
+        best = { html: repaired.html, mp4: rr.mp4, issues: rr.issues }
+        noProgress = 0
+        for (const issue of rr.issues) cb.onLog({ ts: Date.now(), level: 'warn', message: `  • still: ${issue}` })
+      } else {
+        // Regression or stall — DISCARD this repair, keep the known-good best.
+        noProgress++
         cb.onLog({
           ts: Date.now(),
           level: 'warn',
-          message: `${tag}: visual review call failed (${err.message}) — accepting the render and moving on.`
+          message: `${tag}: this repair did not reduce issues (${best.issues.length} → ${rr.issues.length}) — discarding it and keeping the previous best so no new problems are introduced.`
         })
-        reviewPassed = true
-        lastReviewIssues = []
-        break
+        if (noProgress >= MAX_NO_PROGRESS) {
+          cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: no progress for ${MAX_NO_PROGRESS} attempts — stopping to save renders/credits.` })
+          break
+        }
       }
+    }
 
-      lastReviewIssues = review.issues
-      if (review.pass) {
-        cb.onLog(info(`${tag}: visual review PASSED ✓`))
-        reviewPassed = true
-        break
-      }
-
+    if (best.issues.length > 0) {
       cb.onLog({
         ts: Date.now(),
         level: 'warn',
-        message: `${tag}: visual review FAILED — ${review.issues.length} issue(s):`
+        message: `Scene ${i + 1}: shipping the best version (fewest issues) after ${attempt} attempt(s). Remaining issue(s):`
       })
-      for (const issue of review.issues) {
-        cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
-      }
-      // Feed the issues into the next HTML attempt
-      visualFeedback = review.issues
+      for (const issue of best.issues) cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
     }
 
-    if (!reviewPassed) {
-      cb.onLog({
-        ts: Date.now(),
-        level: 'warn',
-        message: `Scene ${i + 1}: visual review did not pass after ${MAX_VISUAL_REVIEW_ATTEMPTS} attempts. Using the best output anyway. Remaining issues:`
-      })
-      for (const issue of lastReviewIssues) {
-        cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
-      }
-    }
+    const rawMp4 = best.mp4
 
     // Mux audio + 1s held-frame tail into the final scene MP4
     cb.onProgress(
@@ -277,7 +269,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     )
     const sceneTotalSeconds = audioDuration + SCENE_TAIL_SECONDS
     cb.onLog(info(
-      `✓ Scene ${i + 1}/${totalScenes} saved (${audioDuration.toFixed(2)}s audio + ${SCENE_TAIL_SECONDS.toFixed(1)}s held-frame tail = ${sceneTotalSeconds.toFixed(2)}s, ${visualAttempt} render attempt${visualAttempt === 1 ? '' : 's'}) → ${finalMp4}`
+      `✓ Scene ${i + 1}/${totalScenes} saved (${audioDuration.toFixed(2)}s audio + ${SCENE_TAIL_SECONDS.toFixed(1)}s held-frame tail = ${sceneTotalSeconds.toFixed(2)}s, ${attempt} review attempt${attempt === 1 ? '' : 's'}) → ${finalMp4}`
     ))
 
     sceneResults.push({

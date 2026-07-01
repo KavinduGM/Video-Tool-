@@ -136,6 +136,16 @@ You can put text inside boxes and circles — just describe them normally in the
 
 So for boxed content you get closed outlines and no text-on-border overlap without doing anything special in the script.
 
+### Visual review & surgical repair
+
+After a scene renders, the app extracts the final frame and has Claude (vision) review it against the explainer. If it finds issues, the scene is repaired up to **10 times** — but the repair is **surgical**, not a full rewrite:
+
+- Claude is given the current working HTML and the specific issues, and returns **minimal find/replace edits** (like a diff). The app applies them deterministically, so every part not related to an issue stays **byte-for-byte identical**. Fixing one cropped word can't reshuffle the rest of the scene.
+- The app keeps the version with the **fewest issues** and **discards any repair that makes things worse**, so a fix can never regress the scene.
+- It stops early on a clean pass or when repairs stop making progress, so it doesn't burn renders/credits oscillating.
+
+This replaces the old behavior of regenerating the whole scene on every review failure (expensive, and prone to introducing brand-new problems while fixing one).
+
 ### Scene length matters
 
 Aim for **10–20 seconds of voiceover per scene**. Longer single scenes work but Claude struggles to fill 60+ seconds of unique animation, and the result can feel padded or repetitive. If your explainer has clearly distinct beats (an opening, a comparison section, a closing CTA, …), split each into its own scene with its own voiceover and a `transition_out` between them. You'll get tighter, more coherent motion, and the per-scene transitions make the cuts feel intentional.

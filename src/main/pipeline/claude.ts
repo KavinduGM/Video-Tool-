@@ -848,6 +848,193 @@ function finalize(
   return { html, sanitized, attempts, validationStatus, validationLog, safeZone }
 }
 
+// ====================================================================
+// SURGICAL REPAIR — fix ONLY the reviewer's issues with the smallest set
+// of find/replace edits, preserving the rest of the working HTML byte-for-
+// byte. This avoids the "rewrite the whole scene to fix one word and
+// regress everything else" failure mode, and costs a fraction of a full
+// regeneration (small output, no re-derivation of the whole composition).
+// ====================================================================
+
+export interface RepairArgs {
+  apiKey: string
+  model: string
+  html: string
+  issues: string[]
+  explainer: string
+  ratio: AspectRatio
+  durationSeconds: number
+}
+
+export interface RepairResult {
+  html: string
+  applied: number
+  failed: string[]
+  safeZone: SceneHtmlResult['safeZone']
+  log: string[]
+}
+
+const REPAIR_SYSTEM = `You are a precise HTML repair tool for animated motion-graphics scenes.
+
+You are given a COMPLETE, WORKING HTML document and a list of SPECIFIC visual issues found
+in its rendered final frame. Fix ONLY those issues with the SMALLEST possible set of edits.
+
+ABSOLUTE RULES:
+- Do NOT rewrite, restructure, or reformat the document. Do NOT touch anything unrelated to
+  the listed issues. Every part of the HTML you don't explicitly edit must stay identical.
+- Make the SMALLEST change that resolves each issue. Prefer, in order: adjust a font-size,
+  adjust a color, adjust spacing/padding, adjust a position value, close/complete a tag.
+  A cropped or oversized line is almost always fixed by REDUCING its font-size — do that
+  rather than moving or restructuring anything.
+- Do NOT introduce new problems. Never move an element to fix a different element unless the
+  issue explicitly requires it. Changing a size or color is always safer than moving things.
+- For 9:16 scenes: keep every element inside the .safe container; for boxes/circles with text,
+  keep using the .hf-box / .hf-circle primitive with text as children — never switch a box to
+  an SVG stroke and never place text over a separately-drawn shape.
+
+OUTPUT FORMAT — respond with ONLY this JSON, no prose, no code fences:
+{ "edits": [ { "find": "<verbatim substring from the HTML>", "replace": "<replacement>", "reason": "<which issue this fixes>" } ] }
+
+Rules for each edit:
+- "find" MUST be copied VERBATIM from the given HTML — exact characters, spacing, and quotes —
+  and MUST be unique (appear exactly once). Include a little surrounding context to make it
+  unique if the raw value repeats.
+- Keep "find" short and targeted (a single attribute, style declaration, or tag), not whole blocks.
+- Only include edits that fix a listed issue. If an issue cannot be fixed with a small edit,
+  include your best minimal edit for it anyway — do NOT rewrite the document.`
+
+interface Edit {
+  find: string
+  replace: string
+  reason?: string
+}
+
+export async function repairSceneHtml(args: RepairArgs): Promise<RepairResult> {
+  if (!args.apiKey) throw new Error('Anthropic API key is not set in Settings.')
+  const client = new Anthropic({ apiKey: args.apiKey })
+  const log: string[] = []
+
+  const userPrompt =
+    `Ratio: ${args.ratio}\n` +
+    `Scene explainer (context only — do not restructure to match it, just fix the issues):\n"""\n${args.explainer}\n"""\n\n` +
+    `Issues found in the rendered FINAL frame — fix ONLY these, with minimal edits:\n` +
+    args.issues.map((s, i) => `  ${i + 1}. ${s}`).join('\n') +
+    `\n\nCURRENT complete HTML (copy each "find" verbatim from this):\n\n` +
+    '```html\n' +
+    args.html +
+    '\n```'
+
+  const stream = client.messages.stream({
+    model: args.model || 'claude-opus-4-8',
+    max_tokens: 8000,
+    system: REPAIR_SYSTEM,
+    messages: [{ role: 'user', content: userPrompt }]
+  })
+  const resp = await stream.finalMessage()
+  const text = resp.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as Anthropic.TextBlock).text)
+    .join('')
+    .trim()
+
+  const edits = parseEdits(text)
+  if (edits.length === 0) {
+    log.push('repair: model returned no usable edits')
+    return {
+      html: args.html,
+      applied: 0,
+      failed: ['no edits parsed'],
+      safeZone: args.ratio === '9:16' ? 'skipped' : 'n/a',
+      log
+    }
+  }
+
+  const { html: patched, applied, failed } = applyEdits(args.html, edits)
+  log.push(
+    `repair: applied ${applied}/${edits.length} minimal edit(s)${failed.length ? `, ${failed.length} could not apply` : ''}`
+  )
+  for (const f of failed) log.push(`  - skipped: ${f}`)
+
+  // Re-assert the deterministic geometry guarantee on the patched HTML.
+  let outHtml = patched
+  let safeZone: RepairResult['safeZone'] = 'n/a'
+  if (args.ratio === '9:16') {
+    if (applied > 0) {
+      outHtml = injectShapeAssets(outHtml)
+      const m = await measureSafeZone(outHtml, args.durationSeconds)
+      if (m.measured && !m.ok) {
+        const fit = fitHtmlToSafeZone(outHtml, m)
+        outHtml = fit.fitted ? fit.html : outHtml
+        safeZone = 'force-fitted'
+        log.push(`repair: patched content exceeded the safe zone — applied geometric force-fit (scale ${fit.scale.toFixed(3)})`)
+      } else {
+        safeZone = m.measured ? 'ok' : 'skipped'
+      }
+    } else {
+      safeZone = 'skipped'
+    }
+  }
+
+  return { html: outHtml, applied, failed, safeZone, log }
+}
+
+function parseEdits(text: string): Edit[] {
+  let raw = text.trim()
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/, '').trim()
+  }
+  const first = raw.indexOf('{')
+  const last = raw.lastIndexOf('}')
+  if (first >= 0 && last > first) raw = raw.slice(first, last + 1)
+  try {
+    const parsed = JSON.parse(raw)
+    const arr = Array.isArray(parsed.edits) ? parsed.edits : []
+    return arr
+      .filter((e: any) => e && typeof e.find === 'string' && typeof e.replace === 'string' && e.find.length > 0)
+      .map((e: any) => ({
+        find: e.find as string,
+        replace: e.replace as string,
+        reason: typeof e.reason === 'string' ? e.reason : undefined
+      }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Apply edits as exact, unique string replacements. An edit that doesn't match
+ * verbatim, or matches more than once, is skipped (reported in `failed`) rather
+ * than risking a wrong or duplicated change. Edits apply sequentially against
+ * the evolving document.
+ */
+function applyEdits(html: string, edits: Edit[]): { html: string; applied: number; failed: string[] } {
+  let out = html
+  let applied = 0
+  const failed: string[] = []
+  for (const e of edits) {
+    if (e.find === e.replace) {
+      failed.push(`no-op: ${shortEdit(e)}`)
+      continue
+    }
+    const idx = out.indexOf(e.find)
+    if (idx < 0) {
+      failed.push(`not found verbatim: ${shortEdit(e)}`)
+      continue
+    }
+    if (out.indexOf(e.find, idx + e.find.length) >= 0) {
+      failed.push(`ambiguous (matches >1): ${shortEdit(e)}`)
+      continue
+    }
+    out = out.slice(0, idx) + e.replace + out.slice(idx + e.find.length)
+    applied++
+  }
+  return { html: out, applied, failed }
+}
+
+function shortEdit(e: Edit): string {
+  return (e.reason || e.find).replace(/\s+/g, ' ').slice(0, 60)
+}
+
 function buildUserPromptForAttempt(
   args: SceneRenderArgs,
   attempt: number,
