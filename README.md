@@ -127,6 +127,15 @@ If you don't name bands, the lines are simply stacked and centered inside the sa
 
 This runs only for 9:16 and only adds work when a scene actually overflows. If the measurement can't run for some reason, the pipeline falls back to the prompt + visual-reviewer safeguards and logs that it did so.
 
+### Shapes with text (boxes & circles)
+
+You can put text inside boxes and circles — just describe them normally in the explainer (e.g. *"a hand-drawn rectangular box with a sky-blue outline; inside, three white lines…"*). You don't write any HTML. Two common defects are fixed **structurally**, not by asking Claude nicely:
+
+- **Open sides** (a rectangle missing one edge) — the system provides a guaranteed **closed** box/circle primitive whose outline is a real CSS border drawn on a full-inset layer. A CSS border can't render an open side; the hand-drawn wobble is a displacement filter on the border only, so it still looks marker-drawn.
+- **Text overlapping the outline** — text goes *inside* the shape as padded children, so the box auto-sizes around it and text can never touch the border. After generation the app measures the real geometry and, if any text sits on a shape's outline, regenerates with that exact feedback.
+
+So for boxed content you get closed outlines and no text-on-border overlap without doing anything special in the script.
+
 ### Scene length matters
 
 Aim for **10–20 seconds of voiceover per scene**. Longer single scenes work but Claude struggles to fill 60+ seconds of unique animation, and the result can feel padded or repetitive. If your explainer has clearly distinct beats (an opening, a comparison section, a closing CTA, …), split each into its own scene with its own voiceover and a `transition_out` between them. You'll get tighter, more coherent motion, and the per-scene transitions make the cuts feel intentional.

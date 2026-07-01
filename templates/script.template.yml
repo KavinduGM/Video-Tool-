@@ -41,6 +41,15 @@
 #     centered inside the safe area — still never cropped.
 #
 #   See templates/zone-map-9x16.svg for a visual of the grid.
+#
+# ---------------------------------------------------------------------
+# SHAPES WITH TEXT (boxes & circles)
+# ---------------------------------------------------------------------
+# You can describe boxes/circles with text inside them in plain language,
+# e.g. "a hand-drawn rectangular box with a sky-blue outline; inside,
+# three white lines write in". You do NOT write any HTML. The system
+# guarantees the outline is fully closed (no missing sides) and that the
+# text sits inside with padding so it never overlaps the border.
 # =====================================================================
 
 video_name: "my-9x16-video"          # the final file will be <video_name>.mp4

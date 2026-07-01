@@ -38,7 +38,14 @@ export interface SafeZoneOffender {
   sides: string[] // which safe-area edges this element crosses
 }
 
+export interface OverlapViolation {
+  text: string
+  side: string // which outline side the text crosses
+  shape: string // shape tag / class for context
+}
+
 export interface SafeZoneMeasurement {
+  /** edge safety only: true when nothing crosses the strict margins */
   ok: boolean
   /** true when a measurable content box was found; false means we couldn't measure */
   measured: boolean
@@ -47,6 +54,8 @@ export interface SafeZoneMeasurement {
   /** pixels past the safe area on each side (0 when inside) */
   overflow: { left: number; right: number; top: number; bottom: number }
   offenders: SafeZoneOffender[]
+  /** text elements that cross a shape's outline (text-over-box overlap) */
+  overlaps: OverlapViolation[]
   note?: string
 }
 
@@ -76,6 +85,8 @@ function measureScript(): string {
 
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     var offenders = []
+    var shapes = [] // {x0,y0,x1,y1,bw,label}
+    var texts = []  // {x0,y0,x1,y1,text}
     var els = stage.querySelectorAll('*')
     for (var i = 0; i < els.length; i++) {
       var el = els[i]
@@ -86,7 +97,8 @@ function measureScript(): string {
       if (parseFloat(cs.opacity || '1') === 0) continue
 
       var tag = el.tagName.toLowerCase()
-      var isShape = ['svg','rect','circle','ellipse','path','line','polygon','polyline','text','tspan','image','img'].indexOf(tag) >= 0
+      var isSvgShapeTag = ['rect','circle','ellipse','path','line','polygon','polyline'].indexOf(tag) >= 0
+      var isInkTag = isSvgShapeTag || ['svg','text','tspan','image','img'].indexOf(tag) >= 0
       var hasOwnText = false
       for (var c = 0; c < el.childNodes.length; c++) {
         var n = el.childNodes[c]
@@ -96,13 +108,14 @@ function measureScript(): string {
       var bgColor = cs.backgroundColor
       var hasBgPaint = (cs.backgroundImage && cs.backgroundImage !== 'none') ||
                        (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent')
-      var isInk = isShape || hasOwnText || hasBorder || hasBgPaint
+      var isBoxClass = el.classList && (el.classList.contains('hf-box') || el.classList.contains('hf-circle'))
+      var isInk = isInkTag || hasOwnText || hasBorder || hasBgPaint || isBoxClass
       if (!isInk) continue
 
       var r = el.getBoundingClientRect()
       if (r.width <= 0 || r.height <= 0) continue
       // Ignore full-bleed backgrounds (>=97% of the stage) that carry no text.
-      if (!hasOwnText && (r.width * r.height) >= stageArea * 0.97) continue
+      if (!hasOwnText && !isBoxClass && (r.width * r.height) >= stageArea * 0.97) continue
 
       var x0 = (r.left - sb.left) * sx, y0 = (r.top - sb.top) * sy
       var x1 = (r.right - sb.left) * sx, y1 = (r.bottom - sb.top) * sy
@@ -111,9 +124,55 @@ function measureScript(): string {
       if (x1 > maxX) maxX = x1
       if (y1 > maxY) maxY = y1
       offenders.push({ tag: tag, text: (el.textContent || '').trim().slice(0, 50), x0: x0, y0: y0, x1: x1, y1: y1 })
+
+      // Classify for overlap detection.
+      if (hasOwnText) {
+        texts.push({ x0: x0, y0: y0, x1: x1, y1: y1, text: (el.textContent || '').trim().slice(0, 50) })
+      }
+      var isShape = isBoxClass || (isSvgShapeTag && (cs.stroke && cs.stroke !== 'none')) || (hasBorder && !hasOwnText)
+      if (isShape) {
+        var bw = 4
+        if (isBoxClass) { var v = parseFloat(cs.getPropertyValue('--hf-bw')); if (v) bw = v }
+        else if (hasBorder) {
+          bw = Math.max(
+            parseFloat(cs.borderTopWidth) || 0, parseFloat(cs.borderRightWidth) || 0,
+            parseFloat(cs.borderBottomWidth) || 0, parseFloat(cs.borderLeftWidth) || 0
+          ) || 4
+        } else {
+          bw = parseFloat(cs.strokeWidth) || parseFloat(el.getAttribute('stroke-width')) || 4
+        }
+        shapes.push({ x0: x0, y0: y0, x1: x1, y1: y1, bw: bw * sx, label: isBoxClass ? (el.className || tag) : tag })
+      }
     }
     if (!isFinite(minX)) return { empty: true }
-    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, hasSafe: !!stage.querySelector('.safe'), offenders: offenders }
+
+    // Text-over-outline overlaps: a text rect intersecting any of a shape's four
+    // border bands means the text is sitting on / crossing the outline.
+    var TOL = 3
+    function hit(a, b) { return !(a.x1 < b.x0 || a.x0 > b.x1 || a.y1 < b.y0 || a.y0 > b.y1) }
+    var overlaps = []
+    var seen = {}
+    for (var si = 0; si < shapes.length; si++) {
+      var s = shapes[si], band = s.bw + TOL
+      var bands = [
+        { side: 'top',    x0: s.x0 - TOL, y0: s.y0 - TOL,   x1: s.x1 + TOL, y1: s.y0 + band },
+        { side: 'bottom', x0: s.x0 - TOL, y0: s.y1 - band,  x1: s.x1 + TOL, y1: s.y1 + TOL },
+        { side: 'left',   x0: s.x0 - TOL, y0: s.y0 - TOL,   x1: s.x0 + band, y1: s.y1 + TOL },
+        { side: 'right',  x0: s.x1 - band, y0: s.y0 - TOL,  x1: s.x1 + TOL, y1: s.y1 + TOL }
+      ]
+      for (var ti = 0; ti < texts.length; ti++) {
+        var t = texts[ti]
+        for (var bi = 0; bi < bands.length; bi++) {
+          if (hit(t, bands[bi])) {
+            var key = t.text + '|' + bands[bi].side
+            if (!seen[key]) { seen[key] = 1; overlaps.push({ text: t.text, side: bands[bi].side, shape: s.label }) }
+            break
+          }
+        }
+      }
+    }
+
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, hasSafe: !!stage.querySelector('.safe'), offenders: offenders, overlaps: overlaps.slice(0, 6) }
   })()`
 }
 
@@ -167,6 +226,7 @@ export async function measureSafeZone(
         content: null,
         overflow: emptyOverflow(),
         offenders: [],
+        overlaps: [],
         note: data?.error ? `measure skipped: ${data.error}` : 'no measurable content'
       }
     }
@@ -206,7 +266,13 @@ export async function measureSafeZone(
       .sort((a: SafeZoneOffender, b: SafeZoneOffender) => b.sides.length - a.sides.length)
       .slice(0, 5)
 
-    return { ok, measured: true, hasSafeWrapper: !!data.hasSafe, content, overflow, offenders }
+    const overlaps: OverlapViolation[] = (data.overlaps || []).map((o: any) => ({
+      text: String(o.text || ''),
+      side: String(o.side || ''),
+      shape: String(o.shape || '')
+    }))
+
+    return { ok, measured: true, hasSafeWrapper: !!data.hasSafe, content, overflow, offenders, overlaps }
   } catch (err: any) {
     return {
       ok: true, // infra failure → skip, don't fail the job
@@ -215,6 +281,7 @@ export async function measureSafeZone(
       content: null,
       overflow: emptyOverflow(),
       offenders: [],
+      overlaps: [],
       note: `measure error: ${err?.message ?? err}`
     }
   } finally {
@@ -321,5 +388,20 @@ export function safeZoneFeedback(m: SafeZoneMeasurement): string {
     `Offending elements: ${worst || '(unnamed)'}. ` +
     `Fix by REDUCING font-size and/or repositioning these so every element is fully inside the safe area. ` +
     `Keep everything inside the #stage > .safe container and do not let any line get wider than ${SAFE_AREA.width}px.`
+  )
+}
+
+/** Feedback for the retry prompt when text sits on / crosses a shape outline. */
+export function overlapFeedback(overlaps: OverlapViolation[]): string {
+  const list = overlaps
+    .map((o) => `"${o.text}" crosses the ${o.side} edge of a ${o.shape}`)
+    .join('; ')
+  return (
+    `TEXT OVERLAPS A SHAPE OUTLINE (${overlaps.length} case${overlaps.length === 1 ? '' : 's'}): ${list}. ` +
+    `This means text is sitting on or spilling over a box/circle border. ` +
+    `Fix it structurally: put the text INSIDE the shape using the provided .hf-box / .hf-circle ` +
+    `primitive as child elements (the box auto-sizes with padding so text can never touch the outline). ` +
+    `Do NOT absolutely-position text over a separately-drawn box, and REDUCE the child font-size if a ` +
+    `line is too wide for the box.`
   )
 }

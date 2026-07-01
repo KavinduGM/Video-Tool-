@@ -3,7 +3,8 @@ import fs from 'node:fs/promises'
 import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
 import { zoneGuideForPrompt, zoneGuideForReviewer } from '@shared/zones'
-import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback } from './safezone'
+import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback } from './safezone'
+import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
 
 export interface SceneRenderArgs {
   apiKey: string
@@ -303,8 +304,11 @@ function buildUserPrompt(args: SceneRenderArgs): string {
   const style = args.style
     ? `\nStyle hints:\n- description: ${args.style.description ?? '(none)'}\n- colors: ${(args.style.colors ?? []).join(', ') || '(none)'}\n- fonts: ${(args.style.fonts ?? []).join(', ') || '(none)'}`
     : ''
-  // The safe-zone contract is specific to 9:16. Only inject it for that ratio.
-  const zoneBlock = args.ratio === '9:16' ? `\n${zoneGuideForPrompt(args.durationSeconds)}\n` : ''
+  // The safe-zone contract and shape primitive are specific to 9:16.
+  const zoneBlock =
+    args.ratio === '9:16'
+      ? `\n${zoneGuideForPrompt(args.durationSeconds)}\n\n${shapeGuideForPrompt()}\n`
+      : ''
   return `Build a single Hyperframes composition for scene ${args.sceneIndex + 1} of ${args.totalScenes}.
 
 Aspect ratio: ${args.ratio}
@@ -698,6 +702,10 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
       const cleaned = sanitizeLoops(html)
       cleanHtml = cleaned.html
       sanitized = cleaned.sanitized
+      // Guarantee the correct shape primitive is present (9:16 only). Injected
+      // before measurement so overlap detection sees the real box geometry, and
+      // before render so the exported video uses the guaranteed-closed borders.
+      if (args.ratio === '9:16') cleanHtml = injectShapeAssets(cleanHtml)
     } catch (err: any) {
       // Incomplete / malformed document — retry rather than aborting the job.
       lastReason =
@@ -731,32 +739,59 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           return finalize(cleanHtml, sanitized, attempt, 'passed', 'skipped', log)
         }
 
-        if (measurement.ok) {
+        const edgeOverflow = !measurement.ok
+        const overlaps = measurement.overlaps
+
+        if (!edgeOverflow && overlaps.length === 0) {
           const c = measurement.content!
           log.push(
-            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}] inside safe area)`
+            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], no shape overlaps)`
           )
           return finalize(cleanHtml, sanitized, attempt, 'passed', 'ok', log)
         }
 
-        // Overflow detected.
+        // A violation exists (edge overflow and/or text-over-shape overlap).
         if (!isFinalAttempt) {
-          lastReason = safeZoneFeedback(measurement)
+          const reasons: string[] = []
+          if (edgeOverflow) reasons.push(safeZoneFeedback(measurement))
+          if (overlaps.length > 0) reasons.push(overlapFeedback(overlaps))
+          lastReason = reasons.join('\n\n')
           lastHtml = cleanHtml
-          const sides = Object.entries(measurement.overflow)
-            .filter(([, v]) => v > 1)
-            .map(([k, v]) => `${k} +${Math.round(v)}px`)
-            .join(', ')
-          log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${sides}) — regenerating with exact feedback`)
+          const bits: string[] = []
+          if (edgeOverflow) {
+            bits.push(
+              'edge ' +
+                Object.entries(measurement.overflow)
+                  .filter(([, v]) => v > 1)
+                  .map(([k, v]) => `${k}+${Math.round(v)}px`)
+                  .join('/')
+            )
+          }
+          if (overlaps.length > 0) bits.push(`${overlaps.length} text-on-outline overlap(s)`)
+          log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${bits.join(', ')}) — regenerating with exact feedback`)
           continue
         }
 
-        // Final attempt still overflows → guarantee correctness geometrically.
-        const fit = fitHtmlToSafeZone(cleanHtml, measurement)
-        log.push(
-          `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone still violated after ${MAX_ATTEMPTS} attempts — applied geometric force-fit (scale ${fit.scale.toFixed(3)}) so nothing is cropped`
-        )
-        return finalize(fit.fitted ? fit.html : cleanHtml, sanitized, attempt, 'passed', 'force-fitted', log)
+        // Final attempt. Edge overflow is force-fittable (geometric). Overlaps
+        // are not (scaling preserves relative overlap) — the structural .hf-box
+        // primitive is the prevention; if any remain we log and ship best output.
+        let outHtml = cleanHtml
+        let sz: SceneHtmlResult['safeZone'] = 'ok'
+        if (edgeOverflow) {
+          const fit = fitHtmlToSafeZone(cleanHtml, measurement)
+          outHtml = fit.fitted ? fit.html : cleanHtml
+          sz = 'force-fitted'
+          log.push(
+            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone edge still violated — applied geometric force-fit (scale ${fit.scale.toFixed(3)}) so nothing is cropped`
+          )
+        }
+        if (overlaps.length > 0) {
+          log.push(
+            `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — ${overlaps.length} text-on-shape overlap(s) remain after ${MAX_ATTEMPTS} attempts: ` +
+              overlaps.map((o) => `"${o.text}" (${o.side})`).join(', ')
+          )
+        }
+        return finalize(outHtml, sanitized, attempt, 'passed', sz, log)
       }
 
       return finalize(cleanHtml, sanitized, attempt, 'passed', 'n/a', log)
@@ -836,16 +871,18 @@ function buildUserPromptForAttempt(
 
   if (attempt === 1) return basePrompt
 
-  // The retry reason may be about animation coverage, truncation, OR the
-  // deterministic safe-zone measurement. Lead with the exact reason (it already
-  // contains the specifics and, for safe-zone, precise pixel numbers), then add
-  // the relevant reminders.
-  const isSafeZone = /SAFE ZONE/i.test(prevReason)
+  // The retry reason may be about animation coverage, truncation, the safe-zone
+  // measurement, OR text-over-shape overlap. Lead with the exact reason (it
+  // already contains the specifics and precise pixel numbers), then add the
+  // relevant reminders.
+  const isLayout = /SAFE ZONE|OVERLAPS A SHAPE/i.test(prevReason)
   const minRequired = Math.max(0.5, args.durationSeconds - 2.0)
-  const reminders = isSafeZone
+  const reminders = isLayout
     ? `You MUST fix this in this attempt:\n` +
       `  - Move/shrink the named elements so EVERY element is fully inside the safe area\n` +
-      `    x[${'60'}, ${'1020'}] y[${'160'}, ${'1680'}]. Reduce font-size before anything else.\n` +
+      `    x[60, 1020] y[160, 1680]. Reduce font-size before anything else.\n` +
+      `  - For any box/circle containing text, use the provided .hf-box / .hf-circle primitive\n` +
+      `    with the text as child elements — never text positioned over a separately-drawn shape.\n` +
       `  - Keep all content inside the required #stage > .safe scaffold; nothing may extend past it.\n` +
       `  - Do not let any single line get wider than 960px — shrink the font until it fits.\n`
     : `You MUST fix this in this attempt:\n` +
