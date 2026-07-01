@@ -61,11 +61,17 @@ function shapeCss(): string {
     max-width: 900px;        /* stay well within the 960px safe width */
   }
   .hf-circle {
+    /* A DEFINITE, fixed diameter. Do NOT rely on aspect-ratio here: in a flex
+       column without a definite width, aspect-ratio can resolve the height to
+       zero, which collapses the round border to nothing (the "empty middle /
+       circle missing" bug). An explicit width AND height can never collapse. */
+    width: 360px;
+    height: 360px;
+    flex: 0 0 auto;          /* never let a flex parent shrink it away */
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 60px;
-    aspect-ratio: 1 / 1;
+    padding: 36px;
   }
   /* The outline: a clean CSS border on a full-inset layer — always fully
      closed, crisp (no hand-drawn wobble), with a slight rounding. Shapes are
@@ -132,10 +138,13 @@ export function shapeGuideForPrompt(): string {
     - The box auto-sizes around the lines with built-in padding — text can never
       touch the outline. Add more child <div> lines for more rows.
 
-  CIRCLE:
-    <div class="hf-circle" style="color:#F5C842; width:520px;">
-      <div style="color:#FFFFFF;">Core Idea</div>
+  CIRCLE (fixed 360px diameter — put only a SHORT word or 1–2 word phrase inside):
+    <div class="hf-circle" style="color:#5BC8F5;">
+      <div style="color:#F5C842;">TARGET?</div>
     </div>
+    - color on .hf-circle sets the OUTLINE color; the child sets the text color.
+    - Keep the inner text short (it must fit a 360px circle). For longer content
+      use a box, not a circle.
 
   HARD RULES:
     - Shapes are CLEAN, not hand-drawn. The outline is a crisp CSS border. Do
@@ -154,5 +163,13 @@ export function shapeGuideForPrompt(): string {
       to "draw" the outline.
     - Every reveal plays ONCE and holds. No pulsing/looping the shape or its text.
     - Keep a box within the safe width — the primitive caps at 900px; if your
-      text is longer, reduce the child font-size so it fits on one line.`
+      text is longer, reduce the child font-size so it fits on one line.
+    - SHAPE PLACEMENT: a shape is TALLER than one text band. Do NOT put a
+      .hf-box or .hf-circle inside a fixed-height band row, and NEVER wrap it in
+      a container with overflow:hidden or a fixed height that could clip it — that
+      makes the shape collapse or vanish. Place the shape centered in the vertical
+      MIDDLE of the safe area, as a direct child of .safe (or a wrapper with no
+      height limit and no overflow clipping), free to take its full height. The
+      band names position TEXT LINES; a shape occupies the center and may span the
+      height of about two bands.`
 }
