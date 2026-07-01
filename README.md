@@ -89,6 +89,37 @@ Validation is strict. Unknown top-level keys, unknown transitions, or out-of-ran
 
 `description`, `colors`, and `fonts` can be written either at the top level or nested under `style:`. `colors` and `fonts` accept a YAML list (`- "#F5C842"`) **or** a plain string (`"warm yellow, sky blue, coral"`). `description` is free-form prose.
 
+### 9:16 safe zones (stop edge-cropping)
+
+For **9:16** videos the tool enforces a fixed layout grid on the 1080 × 1920 canvas so text and shapes never get cropped at the edges. There is a strict no-go margin around the frame and a usable **safe area** split into named bands and columns:
+
+```
+STRICT MARGINS (nothing is placed here):
+  left 60px · right 60px · top 160px · bottom 240px
+  (bottom is largest — that's where TikTok / Reels / Shorts put captions & buttons)
+
+SAFE AREA: x[60 → 1020]  y[160 → 1680]   (960 wide × 1520 tall)
+
+HORIZONTAL BANDS (top → bottom):        COLUMNS (left → right):
+  TOP     y 160  → 464                    LEFT · CENTER · RIGHT
+  UPPER   y 464  → 768                     (default alignment: CENTER)
+  MIDDLE  y 768  → 1072
+  LOWER   y 1072 → 1376
+  BOTTOM  y 1376 → 1680
+```
+
+See [`templates/zone-map-9x16.svg`](templates/zone-map-9x16.svg) for a visual.
+
+**How to use it in a script** — name a band (and optionally a column) in the step text:
+
+```yaml
+Step 1 (TOP band): heading writes in ...
+Step 3 (MIDDLE band): white line writes in ...
+Step 4 (BOTTOM band, CENTER): yellow line writes in ...
+```
+
+If you don't name bands, the lines are simply stacked and centered inside the safe area — still never cropped. The generator emits a required `#stage > .safe` scaffold pinned to those margins, and the visual reviewer **fails** any frame where text touches or crosses a strict margin. The grid is tuned specifically for 9:16; other ratios fall back to the generic layout rules.
+
 ### Scene length matters
 
 Aim for **10–20 seconds of voiceover per scene**. Longer single scenes work but Claude struggles to fill 60+ seconds of unique animation, and the result can feel padded or repetitive. If your explainer has clearly distinct beats (an opening, a comparison section, a closing CTA, …), split each into its own scene with its own voiceover and a `transition_out` between them. You'll get tighter, more coherent motion, and the per-scene transitions make the cuts feel intentional.

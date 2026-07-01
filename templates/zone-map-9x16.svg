@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920" font-family="Segoe UI, Arial, sans-serif">
+  <!-- Canvas -->
+  <rect x="0" y="0" width="1080" height="1920" fill="#000000"/>
+
+  <!-- Strict (no-go) margins -->
+  <g fill="#F57C5B" fill-opacity="0.22">
+    <rect x="0" y="0" width="1080" height="160"/>
+    <rect x="0" y="1680" width="1080" height="240"/>
+    <rect x="0" y="160" width="60" height="1520"/>
+    <rect x="1020" y="160" width="60" height="1520"/>
+  </g>
+  <g fill="#F57C5B" font-size="26" font-weight="700" text-anchor="middle">
+    <text x="540" y="95">STRICT — no content · top 160px</text>
+    <text x="540" y="1815">STRICT — no content · bottom 240px</text>
+  </g>
+
+  <!-- Safe area outline -->
+  <rect x="60" y="160" width="960" height="1520" fill="none" stroke="#5BC8F5" stroke-width="4" stroke-dasharray="2 0"/>
+
+  <!-- Column dividers -->
+  <g stroke="#5BC8F5" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="10 12">
+    <line x1="380" y1="160" x2="380" y2="1680"/>
+    <line x1="700" y1="160" x2="700" y2="1680"/>
+  </g>
+  <g fill="#5BC8F5" font-size="24" font-weight="700" text-anchor="middle" fill-opacity="0.85">
+    <text x="220" y="200">LEFT</text>
+    <text x="540" y="200">CENTER</text>
+    <text x="860" y="200">RIGHT</text>
+  </g>
+
+  <!-- Band dividers -->
+  <g stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="2" stroke-dasharray="14 12">
+    <line x1="60" y1="464" x2="1020" y2="464"/>
+    <line x1="60" y1="768" x2="1020" y2="768"/>
+    <line x1="60" y1="1072" x2="1020" y2="1072"/>
+    <line x1="60" y1="1376" x2="1020" y2="1376"/>
+  </g>
+
+  <!-- Band labels -->
+  <g text-anchor="middle">
+    <g fill="#F5C842" font-size="60" font-weight="800">
+      <text x="540" y="330">TOP</text>
+      <text x="540" y="634">UPPER</text>
+      <text x="540" y="938">MIDDLE</text>
+      <text x="540" y="1242">LOWER</text>
+      <text x="540" y="1546">BOTTOM</text>
+    </g>
+    <g fill="#FFFFFF" fill-opacity="0.55" font-size="26">
+      <text x="540" y="375">y 160 – 464</text>
+      <text x="540" y="679">y 464 – 768</text>
+      <text x="540" y="983">y 768 – 1072</text>
+      <text x="540" y="1287">y 1072 – 1376</text>
+      <text x="540" y="1591">y 1376 – 1680</text>
+    </g>
+  </g>
+
+  <!-- Title -->
+  <text x="540" y="130" fill="#FFFFFF" font-size="30" font-weight="800" text-anchor="middle">9:16 SAFE-ZONE GRID · 1080 × 1920</text>
+  <text x="540" y="1880" fill="#5BC8F5" font-size="24" font-weight="600" text-anchor="middle">Safe area 960 × 1520 · side margins 60px</text>
+</svg>

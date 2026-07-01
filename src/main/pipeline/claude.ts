@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import fs from 'node:fs/promises'
 import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
+import { zoneGuideForPrompt, zoneGuideForReviewer } from '@shared/zones'
 
 export interface SceneRenderArgs {
   apiKey: string
@@ -301,13 +302,15 @@ function buildUserPrompt(args: SceneRenderArgs): string {
   const style = args.style
     ? `\nStyle hints:\n- description: ${args.style.description ?? '(none)'}\n- colors: ${(args.style.colors ?? []).join(', ') || '(none)'}\n- fonts: ${(args.style.fonts ?? []).join(', ') || '(none)'}`
     : ''
+  // The safe-zone contract is specific to 9:16. Only inject it for that ratio.
+  const zoneBlock = args.ratio === '9:16' ? `\n${zoneGuideForPrompt(args.durationSeconds)}\n` : ''
   return `Build a single Hyperframes composition for scene ${args.sceneIndex + 1} of ${args.totalScenes}.
 
 Aspect ratio: ${args.ratio}
 Resolution: ${dims.width}x${dims.height}
 Total duration (seconds): ${args.durationSeconds.toFixed(3)}
 ${style}
-
+${zoneBlock}
 Scene explainer (what the visuals should show and feel like). It MAY contain multiple SECTIONS / beats.
 If it does, your timeline must traverse them sequentially in order, dividing the ${args.durationSeconds.toFixed(2)}-second duration between them, and NEVER looping:
 """
@@ -399,7 +402,14 @@ VERIFICATION before submitting:
 - LAYOUT: at the final frame, NO two visible elements share screen space.
 - LAYOUT: EVERY quoted text line sits on ONE visual line — white-space: nowrap, overflow-wrap:
   normal, word-break: keep-all. NO word is split across two lines. The font-size is small enough
-  that the LONGEST line fits within the stage width minus side padding.
+  that the LONGEST line fits within the stage width minus side padding.${
+    args.ratio === '9:16'
+      ? `
+- SAFE ZONE (9:16): every element is a descendant of .safe; the required #stage > .safe scaffold
+  is used verbatim; nothing touches or crosses the strict edge margins; the widest line fits the
+  safe width. This is a hard gate — a cropped edge fails review.`
+      : ''
+  }
 - COMPLETENESS: EVERY step in the explainer is built as its own element and reveals on the
   timeline. The final frame shows ALL of them, not just the heading. No element re-types or
   re-animates to fill time.
@@ -920,6 +930,7 @@ export async function reviewScene(args: ReviewSceneArgs): Promise<VisualReviewRe
             type: 'text',
             text:
               `Aspect ratio: ${args.ratio}\n\n` +
+              (args.ratio === '9:16' ? `${zoneGuideForReviewer()}\n\n` : '') +
               `Explainer:\n"""\n${args.explainer}\n"""\n\n` +
               `Review the attached final frame against this explainer. ` +
               `Return ONLY the JSON object as specified.`

@@ -1,56 +1,99 @@
 # =====================================================================
-# AI Video Creator — script template
+# AI Video Creator — 9:16 script template
 # =====================================================================
 # Save a copy of this file per video. Drop it into the "New job" tab or
 # pick it from the file dialog. The parser is strict — keep the keys
 # exactly as named below.
 #
 # Required top-level keys: video_name, ratio, output_folder, voice_profile, scenes
-# Optional: voice_speed, style
+# Optional: voice_speed, style (description / colors / fonts)
 #
-# How the pipeline interprets the script:
-#   1. For each scene the tool calls your TTS API to synthesize the voiceover.
-#   2. The audio's exact duration becomes the target visual length.
-#   3. Claude Opus 4.7 is prompted with the scene's `explainer`, the style
-#      hints, the ratio, and the duration — and returns one complete
-#      `index.html` for the HeyGen Hyperframes renderer.
-#   4. Hyperframes renders the HTML to MP4, the audio is muxed in.
-#   5. All scenes are concatenated together using the `transition_out`
-#      between each adjacent pair (the last scene's transition_out is
-#      ignored — set it to `none`).
+# ---------------------------------------------------------------------
+# 9:16 SAFE-ZONE GRID  (canvas 1080 x 1920)
+# ---------------------------------------------------------------------
+# To stop text from being cropped at the edges, the frame has a strict
+# no-go margin and a usable "safe area" split into a grid. Place your
+# lines by naming a BAND (and optionally a COLUMN). Everything you write
+# is kept inside the safe area automatically — but naming bands gives you
+# control over the vertical layout.
+#
+#   STRICT MARGINS (nothing is placed here):
+#     left 60px · right 60px · top 160px · bottom 240px
+#     (bottom is largest — that's where TikTok/Reels/Shorts put captions)
+#
+#   SAFE AREA: x[60 → 1020]  y[160 → 1680]   (960 wide × 1520 tall)
+#
+#   HORIZONTAL BANDS (top → bottom):
+#     TOP     y 160  → 464
+#     UPPER   y 464  → 768
+#     MIDDLE  y 768  → 1072
+#     LOWER   y 1072 → 1376
+#     BOTTOM  y 1376 → 1680
+#
+#   COLUMNS (left → right):   LEFT · CENTER · RIGHT   (default: CENTER)
+#
+#   HOW TO REFERENCE A ZONE IN A STEP:
+#     Just name the band (and optionally the column) in the step text, e.g.
+#       "Step 1 (TOP band): heading writes in ..."
+#       "Step 3 (MIDDLE band): white line writes in ..."
+#       "Step 4 (BOTTOM band, CENTER): yellow line writes in ..."
+#     If you don't name bands at all, the lines are simply stacked and
+#     centered inside the safe area — still never cropped.
+#
+#   See templates/zone-map-9x16.svg for a visual of the grid.
 # =====================================================================
 
-video_name: "novapad-launch"        # the final file will be <video_name>.mp4
-ratio: "16:9"                       # one of: 16:9, 9:16, 1:1, 4:5, 21:9
+video_name: "my-9x16-video"          # the final file will be <video_name>.mp4
+ratio: "9:16"                         # keep this 9:16 — the grid is tuned for it
 output_folder: "C:/Users/me/Desktop/Videos"   # absolute folder path
-voice_profile: "Narrator A"         # must match a saved profile's display name
-voice_speed: 1.0                    # optional, 0.5 – 2.0
+voice_profile: "Archer New"          # must match a saved profile's display name
+voice_speed: 1.0                      # optional, 0.7 – 1.2 (ElevenLabs Turbo v2)
 
-# Optional global brand/style hints sent to Claude on every scene.
-# Use these to keep the look consistent across scenes.
-#
-# You can write these at the TOP LEVEL (shown here) or nested under `style:`.
-# `colors` and `fonts` can be a YAML list (preferred) OR a plain string like
-# "warm yellow, sky blue, coral". `description` is free-form prose.
 description: |
-  Modern, dark theme, bold sans-serif typography, subtle motion, premium feel.
-  Crisp reveals, smooth easing, no flashy gimmicks.
+  Hand-drawn aesthetic throughout, text only. Every element on screen is
+  hand-written text that looks like it was written with a marker on black
+  paper. Slightly imperfect strokes, natural pen weight. All headings
+  write in letter by letter; body lines write in smoothly. Emphasis comes
+  from color and a soft pop on the key word. Background stays solid black.
 colors:
-  - "#0F172A"
-  - "#38BDF8"
-  - "#F8FAFC"
+  - "#000000"   # black background
+  - "#F5C842"   # warm yellow — titles, key points
+  - "#5BC8F5"   # sky blue — supporting emphasis
+  - "#F57C5B"   # coral — warnings
+  - "#FFFFFF"   # white — body text
 fonts:
-  - "Inter"
-  - "JetBrains Mono"
+  - "Caveat"
+  - "Kalam"
+  - "Shadows Into Light"
 
 scenes:
   - explainer: |
-      Opening title card. The product logo appears center-screen with a
-      gentle pulse, then the product name fades in just below. Background
-      is the deepest brand color with a faint radial glow behind the logo.
-    voiceover: "Welcome to NovaPad — the notebook that thinks with you."
+      Solid black background throughout. Text only, no shapes.
+
+      Step 1 (TOP band):
+        A warm yellow (#F5C842) hand-written heading writes in letter by
+        letter, center-aligned:
+          "What is MTSS?"
+
+      Step 2 (UPPER band):
+        A white hand-written line writes in, center-aligned:
+          "Multi-Tiered System of Supports"
+
+      Step 3 (MIDDLE band):
+        A white hand-written line writes in, center-aligned:
+          "A structured way to match students with help"
+
+      Step 4 (LOWER band):
+        A white hand-written line writes in, center-aligned, with the
+        word "DATA" in warm yellow (#F5C842) and a soft pop as it lands:
+          "Every decision runs on DATA"
+
+      Hold the full composition cleanly until the scene ends.
+    voiceover: |
+      MTSS stands for Multi Tiered System of Supports. It is the
+      structured way a school gives each student the right level of help.
+      The first thing to lock in is that every decision runs on data.
     transition_out:
-      # Transition that plays moving FROM this scene INTO the next one.
       # type: none | fade | dissolve |
       #       slide_left | slide_right | slide_up | slide_down |
       #       wipe_left | wipe_right | wipe_up | wipe_down
@@ -58,20 +101,37 @@ scenes:
       duration: 0.5      # seconds, 0 – 5
 
   - explainer: |
-      Feature highlight. Split-screen: a stylised "notebook" on the left
-      with a handwritten line appearing, and on the right a clean panel
-      showing the AI's structured plan being typed out word by word with
-      a soft caret. Light particles drift across the seam.
-    voiceover: "Capture an idea, and NovaPad turns it into a structured plan instantly."
-    transition_out:
-      type: slide_left
-      duration: 0.4
+      Solid black background throughout. Text only, no shapes.
 
-  - explainer: |
-      Closing call-to-action. The product name swells to fill the screen,
-      then the tagline and a soft "Available now on novapad.com" fades in
-      below. Background brand gradient slowly drifts.
-    voiceover: "NovaPad. Think clearly. Available now on novapad.com."
+      Step 1 (TOP band):
+        A warm yellow (#F5C842) hand-written heading writes in letter by
+        letter, center-aligned:
+          "Three Levels of Support"
+
+      Step 2 (UPPER band):
+        A white hand-written line writes in, center-aligned, with "ALL"
+        in sky blue (#5BC8F5):
+          "Tier 1  =  ALL students"
+
+      Step 3 (MIDDLE band):
+        A white hand-written line writes in, center-aligned, with "SOME"
+        in sky blue (#5BC8F5):
+          "Tier 2  =  SOME students"
+
+      Step 4 (LOWER band):
+        A white hand-written line writes in, center-aligned, with "FEW"
+        in sky blue (#5BC8F5):
+          "Tier 3  =  FEW students"
+
+      Step 5 (BOTTOM band):
+        A warm yellow (#F5C842) hand-written line writes in, center-aligned:
+          "Remember it as ALL, SOME, FEW"
+
+      Hold the full composition cleanly until the scene ends.
+    voiceover: |
+      MTSS organizes help into three tiers. Tier one reaches all students.
+      Tier two reaches some in small groups. Tier three reaches the few who
+      need the most. The simplest way to hold this is all some few.
     transition_out:
       type: none         # final scene — no transition needed
       duration: 0
