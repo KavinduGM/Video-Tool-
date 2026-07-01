@@ -1272,6 +1272,19 @@ E2. BROKEN WORDS — no word may be split across two lines. FAIL if you see a wo
    A single quoted line from the explainer must appear on ONE visual line; if it wrapped at all,
    the font is too large for the frame — flag it so the next attempt shrinks the font.
 
+E3. CRAMPED-IN-SHAPE — text inside a box or circle must have clear space between it and the
+   outline on every side. FAIL if any text touches, overlaps, or is pressed right up against a
+   box/circle border (e.g. the last character of "TARGET?" almost touching the circle's edge, or
+   text not centered because it's too wide for the shape). Say which shape and to shrink the text.
+
+E4. CROPPED GLYPHS & STRAY MARKS — look closely at punctuation and edges. FAIL if:
+   - any letter or punctuation mark is cut off, clipped, or malformed (e.g. a "?" whose top is
+     sliced off, or a letter with its descender cut),
+   - there is a stray dot, mark, accent, or fragment on screen that is NOT part of the script's
+     text (e.g. a small coloured dot sitting under a line), or
+   - a character renders in a different colour than the rest of its word for no scripted reason.
+   Name the exact text and the mark so the next attempt can remove/repair it.
+
 F. COLOR FIDELITY — colors should match the explainer (e.g. "sky blue for DIAGNOSIS"
    means the DIAGNOSIS-related elements actually appear sky blue). Flag obvious color mismatches.
    Distinguish this from Check A — if an element is BOTH the wrong color AND dimmer than

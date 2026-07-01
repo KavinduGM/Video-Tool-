@@ -143,8 +143,9 @@ export function shapeGuideForPrompt(): string {
       <div style="color:#F5C842;">TARGET?</div>
     </div>
     - color on .hf-circle sets the OUTLINE color; the child sets the text color.
-    - Keep the inner text short (it must fit a 360px circle). For longer content
-      use a box, not a circle.
+    - Keep the inner text short AND size the font so the text stays roughly ≤ 300px
+      wide, leaving clear space between the text and the round outline on every side
+      (never let the text touch or crowd the circle). For longer content use a box.
 
   HARD RULES:
     - Shapes are CLEAN, not hand-drawn. The outline is a crisp CSS border. Do

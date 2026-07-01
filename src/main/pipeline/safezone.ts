@@ -146,14 +146,27 @@ function measureScript(): string {
     }
     if (!isFinite(minX)) return { empty: true }
 
-    // Text-over-outline overlaps: a text rect intersecting any of a shape's four
-    // border bands means the text is sitting on / crossing the outline.
+    // Text/shape overlaps. Two cases, both flagged:
+    //   (1) CONTAINMENT — a text whose center is INSIDE a shape must fit within
+    //       the shape's inner area with CLEARANCE from the outline. This catches
+    //       cramped text like "TARGET?" pressed against the circle's edge, which
+    //       a thin on-the-line band check misses.
+    //   (2) CROSSING — a text OUTSIDE a shape that still intersects its border
+    //       band (text sitting on an outline it doesn't belong to).
     var TOL = 3
+    var CLEAR = 16 // required gap between inner text and the outline
     function hit(a, b) { return !(a.x1 < b.x0 || a.x0 > b.x1 || a.y1 < b.y0 || a.y0 > b.y1) }
     var overlaps = []
     var seen = {}
+    function record(text, side, shape) {
+      var key = text + '|' + side + '|' + shape
+      if (!seen[key]) { seen[key] = 1; overlaps.push({ text: text, side: side, shape: shape }) }
+    }
     for (var si = 0; si < shapes.length; si++) {
-      var s = shapes[si], band = s.bw + TOL
+      var s = shapes[si]
+      var inset = s.bw + CLEAR
+      var innerL = s.x0 + inset, innerR = s.x1 - inset, innerT = s.y0 + inset, innerB = s.y1 - inset
+      var band = s.bw + TOL
       var bands = [
         { side: 'top',    x0: s.x0 - TOL, y0: s.y0 - TOL,   x1: s.x1 + TOL, y1: s.y0 + band },
         { side: 'bottom', x0: s.x0 - TOL, y0: s.y1 - band,  x1: s.x1 + TOL, y1: s.y1 + TOL },
@@ -162,11 +175,20 @@ function measureScript(): string {
       ]
       for (var ti = 0; ti < texts.length; ti++) {
         var t = texts[ti]
-        for (var bi = 0; bi < bands.length; bi++) {
-          if (hit(t, bands[bi])) {
-            var key = t.text + '|' + bands[bi].side
-            if (!seen[key]) { seen[key] = 1; overlaps.push({ text: t.text, side: bands[bi].side, shape: s.label }) }
-            break
+        var cx = (t.x0 + t.x1) / 2, cy = (t.y0 + t.y1) / 2
+        var centerInside = cx > s.x0 && cx < s.x1 && cy > s.y0 && cy < s.y1
+        if (centerInside) {
+          // (1) Containment with clearance.
+          var sides = []
+          if (t.x0 < innerL) sides.push('left')
+          if (t.x1 > innerR) sides.push('right')
+          if (t.y0 < innerT) sides.push('top')
+          if (t.y1 > innerB) sides.push('bottom')
+          if (sides.length) record(t.text, sides.join('+'), s.label)
+        } else {
+          // (2) Crossing an outline it sits outside of.
+          for (var bi = 0; bi < bands.length; bi++) {
+            if (hit(t, bands[bi])) { record(t.text, bands[bi].side, s.label); break }
           }
         }
       }
