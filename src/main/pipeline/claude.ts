@@ -321,19 +321,20 @@ STRUCTURE (same hard requirements as always):
 6. Deterministic — no Math.random() driving visible motion.
 7. Do NOT include <audio>/<video> tags. The stage fully fills its dimensions with a SOLID background.
 
-TYPOGRAPHIC STYLE (this is the look):
+TYPOGRAPHIC STYLE (this is the look — make it BIG and BOLD, never sparse):
 - SOLID light background — a warm neutral (e.g. #F4EFE6 / #F5F1EA). Never black, never a gradient-heavy look.
-- Text is a BOLD professional SANS-SERIF loaded from Google Fonts — use "Poppins" (weights 600–800) (or Montserrat). Load via <link>. This is NOT hand-drawn — no marker/handwriting fonts.
+- Text is a BOLD professional SANS-SERIF loaded from Google Fonts — use "Poppins" (weights 700–900) (or Montserrat/Archivo). Load via <link>. This is NOT hand-drawn — no marker/handwriting fonts.
 - Near-black text (e.g. #1A1A1A). Choose ONE soft accent HIGHLIGHT color (e.g. a muted coral #F3A79B or soft peach/yellow) used only for the highlight behind key words.
-- Optional small UPPERCASE letter-spaced kicker/label above the headline (e.g. a short code or category), in the accent color, much smaller than the headline.
-- HEADLINE: large, bold, tight line-height, left- or center-aligned, each line on its own line. Wrap the headline into a few balanced lines; NEVER break a word across lines.
+- SIZE — this is the biggest fix: the headline is the HERO and must DOMINATE the frame. Make it LARGE — the longest line should nearly fill the safe width (aim for lines ~820–940px wide on this 1080-wide canvas), which is typically a font-size around 96–140px with font-weight 800–900 and a tight line-height (~1.03–1.1). Do NOT leave the frame looking mostly empty; if it looks small or sparse, INCREASE the font-size until the block fills the middle of the frame. Never break a word across lines — reduce the size only if a word would break.
+- LAYOUT — center the whole block (kicker + headline) VERTICALLY in the safe area so it's balanced, not clustered high or to one side. Center-align the lines. A short UPPERCASE letter-spaced kicker/label above the headline (in the accent color, ~28–36px) adds polish. You MAY add one small accent detail (a short underline bar or a couple of the words set in the accent color) for visual interest — keep it tasteful.
 
-THE ANIMATION (letter-by-letter + word highlight):
-- The headline writes on LETTER BY LETTER: wrap each word in a <span class="word"> and each letter in a <span class="ltr">; reveal letters in sequence with a small per-letter stagger (opacity 0→1, tiny y or blur settle), across the whole duration up to D − 0.3s. Use GSAP timeline or CSS per-letter animation-delay with iteration-count:1 and fill both.
-- WORD-BY-WORD HIGHLIGHT: 1–3 KEY words get a rounded highlight block behind them (a pseudo-element or an absolutely-positioned rounded rect BEHIND the text, border-radius ~10px, the accent color, ~0.85 opacity). The highlight for a word SWEEPS IN (scaleX 0→1 from the left, ~0.35s) right as that word finishes typing — so highlights appear word by word, in reading order, not all at once. The highlighted word's text sits ABOVE its highlight (z-index) and stays readable.
-- The kicker (if any) fades/letters in first, then the headline types on, then the highlights land. End with everything settled and still through D.
+THE ANIMATION — reveal WORD BY WORD (this is required for reliability):
+- Wrap EACH WORD of EVERY line in its own <span class="word"> (do NOT split into per-letter spans — per-letter on multi-line text is fragile and drops lines). Reveal the words ONE AFTER ANOTHER in reading order, each fading/rising in once (opacity 0→1, small y settle, ~0.35s), staggered across the duration and ALL finishing by D − 0.3s. Use a GSAP timeline or CSS per-word animation-delay with iteration-count:1 and fill both.
+- BUILD EVERY WORD OF EVERY LINE. All lines of the on-screen text must be present and fully visible at the end — never render only the first line. Keep the document compact (word spans, not letter spans) so nothing is truncated.
+- WORD HIGHLIGHT: 1–3 KEY words get a rounded highlight block BEHIND them (a pseudo-element or absolutely-positioned rounded rect, border-radius ~12px, the accent color, ~0.85 opacity). Each highlight SWEEPS IN (scaleX 0→1 from the left, ~0.3s) right as that word appears — word by word, in reading order. The word's text sits ABOVE its highlight (z-index) and stays readable. The highlight box must sit snugly around the word (a little horizontal padding), not oversized.
+- Order: the kicker fades in first, then the headline words reveal in sequence, highlights landing with their words. Everything settled and STILL through D. No looping, no re-typing.
 
-LAYOUT / SAFE ZONE: obey the 9:16 safe-zone contract given in the user message — all text inside the safe area, nothing cropped, no word broken across lines, font sized so the longest line fits the safe width.
+LAYOUT / SAFE ZONE: obey the 9:16 safe-zone contract given in the user message — all text inside the safe area, nothing cropped, no word broken across lines.
 
 Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
 
@@ -357,7 +358,12 @@ The voiceover playing over this card (for pacing only — do NOT put it on scree
 ${args.voiceover}
 """
 
-Design it as described in the system prompt: solid light background, bold Poppins headline, optional small uppercase accent kicker if the first short line reads like a label, letters writing on across the full ${args.durationSeconds.toFixed(2)}s (finishing by ${(args.durationSeconds - 0.3).toFixed(2)}s), and a rounded accent HIGHLIGHT sweeping in behind 1–3 KEY words word-by-word as they land. Everything settled and still at the end. Keep every line inside the safe area, no word broken across lines.
+Design it as described in the system prompt:
+- BIG, BOLD Poppins headline that DOMINATES the frame (longest line ~820–940px wide, font-size ~96–140px, weight 800–900). Do not leave the frame mostly empty.
+- The kicker + headline block CENTERED vertically in the safe area (balanced, not clustered up top).
+- Reveal WORD BY WORD (each word its own span, no per-letter spans), all words finishing by ${(args.durationSeconds - 0.3).toFixed(2)}s, with a rounded accent HIGHLIGHT sweeping in behind 1–3 KEY words as they land.
+- EVERY line of the on-screen text must be fully built and visible at the end — do not render only the first line. Everything settled and still at the end.
+- All text inside the safe area, no word broken across lines.
 
 Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
 }
