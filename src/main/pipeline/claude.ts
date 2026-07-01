@@ -21,6 +21,10 @@ export interface SceneRenderArgs {
    * When present, the prompt prepends them so Claude knows what to fix.
    */
   visualFeedback?: string[]
+  /** 'scene' (hand-drawn, default) or a professional typographic 'intro'/'outro' card. */
+  mode?: 'scene' | 'intro' | 'outro'
+  /** For intro/outro: the on-screen text to typeset (one headline per line). */
+  onScreen?: string
 }
 
 const SYSTEM_PROMPT = `You are an expert motion-graphics engineer who writes self-contained HTML compositions for the HeyGen Hyperframes renderer.
@@ -299,7 +303,67 @@ Hard requirements you MUST follow:
     than a 3-sided "hand-drawn" box. Use small roughness (1-2px wobble at most), not
     full broken-line effects.`
 
+// ====================================================================
+// INTRO / OUTRO — a professional TYPOGRAPHIC title card (NOT hand-drawn).
+// Solid light background, bold sans-serif, letter-by-letter reveal with a
+// word-by-word highlight sweep behind key words.
+// ====================================================================
+const INTRO_OUTRO_SYSTEM = `You are an expert motion-graphics engineer writing a single self-contained HTML composition for the HeyGen Hyperframes renderer. This one is a POLISHED TYPOGRAPHIC TITLE CARD (an intro or outro), NOT a hand-drawn scene.
+
+Hyperframes renders "index.html" (a #stage element) to MP4 frame-by-frame.
+
+STRUCTURE (same hard requirements as always):
+1. Output EXACTLY one complete HTML document starting with <!DOCTYPE html>. No markdown, no commentary.
+2. The <body> has exactly one root: <div id="stage" data-composition-id="main" data-width="W" data-height="H" data-duration="D">…</div> with the exact W, H, D given.
+3. All CSS inline in <style>, all JS inline in <script>. CDN imports allowed ONLY for animation libs (gsap) and Google Fonts.
+4. ONE LINEAR PLAYTHROUGH FROM 0 TO D. NO LOOPING: no animation-iteration-count>1 / infinite, no GSAP repeat/yoyo, no setInterval for visible motion. Every animation runs ONCE and holds its final state (animation-fill-mode: both / forwards). At t=D everything sits fully visible and still.
+5. Every animation must FINISH by D − 0.3s (start + duration ≤ D − 0.3). Nothing may be mid-animation at the end.
+6. Deterministic — no Math.random() driving visible motion.
+7. Do NOT include <audio>/<video> tags. The stage fully fills its dimensions with a SOLID background.
+
+TYPOGRAPHIC STYLE (this is the look):
+- SOLID light background — a warm neutral (e.g. #F4EFE6 / #F5F1EA). Never black, never a gradient-heavy look.
+- Text is a BOLD professional SANS-SERIF loaded from Google Fonts — use "Poppins" (weights 600–800) (or Montserrat). Load via <link>. This is NOT hand-drawn — no marker/handwriting fonts.
+- Near-black text (e.g. #1A1A1A). Choose ONE soft accent HIGHLIGHT color (e.g. a muted coral #F3A79B or soft peach/yellow) used only for the highlight behind key words.
+- Optional small UPPERCASE letter-spaced kicker/label above the headline (e.g. a short code or category), in the accent color, much smaller than the headline.
+- HEADLINE: large, bold, tight line-height, left- or center-aligned, each line on its own line. Wrap the headline into a few balanced lines; NEVER break a word across lines.
+
+THE ANIMATION (letter-by-letter + word highlight):
+- The headline writes on LETTER BY LETTER: wrap each word in a <span class="word"> and each letter in a <span class="ltr">; reveal letters in sequence with a small per-letter stagger (opacity 0→1, tiny y or blur settle), across the whole duration up to D − 0.3s. Use GSAP timeline or CSS per-letter animation-delay with iteration-count:1 and fill both.
+- WORD-BY-WORD HIGHLIGHT: 1–3 KEY words get a rounded highlight block behind them (a pseudo-element or an absolutely-positioned rounded rect BEHIND the text, border-radius ~10px, the accent color, ~0.85 opacity). The highlight for a word SWEEPS IN (scaleX 0→1 from the left, ~0.35s) right as that word finishes typing — so highlights appear word by word, in reading order, not all at once. The highlighted word's text sits ABOVE its highlight (z-index) and stays readable.
+- The kicker (if any) fades/letters in first, then the headline types on, then the highlights land. End with everything settled and still through D.
+
+LAYOUT / SAFE ZONE: obey the 9:16 safe-zone contract given in the user message — all text inside the safe area, nothing cropped, no word broken across lines, font sized so the longest line fits the safe width.
+
+Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
+
+function buildIntroOutroPrompt(args: SceneRenderArgs): string {
+  const dims = dimensionsForRatio(args.ratio)
+  const kind = args.mode === 'outro' ? 'OUTRO' : 'INTRO'
+  const zoneBlock = args.ratio === '9:16' ? `\n${zoneGuideForPrompt(args.durationSeconds)}\n` : ''
+  return `Build a single Hyperframes ${kind} title card (professional typographic style).
+
+Aspect ratio: ${args.ratio}
+Resolution: ${dims.width}x${dims.height}
+Total duration (seconds): ${args.durationSeconds.toFixed(3)}
+${zoneBlock}
+ON-SCREEN TEXT — typeset EXACTLY this text (one headline line per line below). Do not add or change words:
+"""
+${args.onScreen ?? ''}
+"""
+
+The voiceover playing over this card (for pacing only — do NOT put it on screen unless it matches the on-screen text):
+"""
+${args.voiceover}
+"""
+
+Design it as described in the system prompt: solid light background, bold Poppins headline, optional small uppercase accent kicker if the first short line reads like a label, letters writing on across the full ${args.durationSeconds.toFixed(2)}s (finishing by ${(args.durationSeconds - 0.3).toFixed(2)}s), and a rounded accent HIGHLIGHT sweeping in behind 1–3 KEY words word-by-word as they land. Everything settled and still at the end. Keep every line inside the safe area, no word broken across lines.
+
+Return ONLY the full HTML document, beginning with <!DOCTYPE html>.`
+}
+
 function buildUserPrompt(args: SceneRenderArgs): string {
+  if (args.mode === 'intro' || args.mode === 'outro') return buildIntroOutroPrompt(args)
   const dims = dimensionsForRatio(args.ratio)
   const style = args.style
     ? `\nStyle hints:\n- description: ${args.style.description ?? '(none)'}\n- colors: ${(args.style.colors ?? []).join(', ') || '(none)'}\n- fonts: ${(args.style.fonts ?? []).join(', ') || '(none)'}`
@@ -677,7 +741,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
       // 16k was truncating the densest scenes mid-document, leaving only the
       // first element built and the rest never revealed. 32k gives ample room.
       max_tokens: 32000,
-      system: SYSTEM_PROMPT,
+      system: args.mode === 'intro' || args.mode === 'outro' ? INTRO_OUTRO_SYSTEM : SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }]
     })
     const resp = await stream.finalMessage()

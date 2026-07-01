@@ -37,6 +37,11 @@ export default function SettingsPage(): JSX.Element {
     if (folder) update('default_output_folder', folder)
   }
 
+  async function pickMusic() {
+    const file = await window.api.dialog.pickAudio()
+    if (file) update('background_music_path', file)
+  }
+
   async function testTts() {
     setChecking(true)
     setTtsCheck(null)
@@ -132,6 +137,25 @@ export default function SettingsPage(): JSX.Element {
           />
           <span className="hint">
             Usually <span className="code-inline">npx hyperframes</span>. Use an absolute path if Node/npx isn't in PATH.
+          </span>
+        </label>
+        <label className="field" style={{ marginTop: 12 }}>
+          Background music (intro / outro)
+          <div className="path-row">
+            <input
+              type="text"
+              value={settings.background_music_path}
+              onChange={(e) => update('background_music_path', e.target.value)}
+              placeholder="Optional — plays under the intro & outro at 5%"
+            />
+            <button className="secondary" onClick={pickMusic}>Choose…</button>
+            {settings.background_music_path && (
+              <button className="ghost" onClick={() => update('background_music_path', '')}>Clear</button>
+            )}
+          </div>
+          <span className="hint">
+            Used only when a script has an <span className="code-inline">intro:</span> or{' '}
+            <span className="code-inline">outro:</span>. A job can override this on the New job tab.
           </span>
         </label>
       </div>

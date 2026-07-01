@@ -43,24 +43,26 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   })
   ipcMain.handle(IPC.PROFILES_DELETE, (_e, id: string) => deleteProfile(id))
 
-  ipcMain.handle(IPC.JOB_ENQUEUE, (_e, args: { script_yaml: string }) => {
+  ipcMain.handle(IPC.JOB_ENQUEUE, (_e, args: { script_yaml: string; music_path?: string }) => {
     const spec = parseScript(args.script_yaml)
     const job = createJob({
       video_name: spec.video_name,
-      script_yaml: args.script_yaml
+      script_yaml: args.script_yaml,
+      music_path: args.music_path || undefined
     })
     broadcast({ type: 'created', job })
     worker.wake()
     return job
   })
 
-  ipcMain.handle(IPC.JOB_ENQUEUE_FILE, async (_e, filePath: string) => {
+  ipcMain.handle(IPC.JOB_ENQUEUE_FILE, async (_e, filePath: string, musicPath?: string) => {
     const yaml = await fs.promises.readFile(filePath, 'utf8')
     const spec = parseScript(yaml)
     const job = createJob({
       video_name: spec.video_name,
       script_yaml: yaml,
-      script_path: filePath
+      script_path: filePath,
+      music_path: musicPath || undefined
     })
     broadcast({ type: 'created', job })
     worker.wake()
@@ -76,7 +78,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
    */
   ipcMain.handle(
     IPC.JOB_ENQUEUE_DOCUMENT,
-    async (_e, filePath: string): Promise<DocumentEnqueueResult> => {
+    async (_e, filePath: string, musicPath?: string): Promise<DocumentEnqueueResult> => {
       const text = await fs.promises.readFile(filePath, 'utf8')
       const chunks = extractScriptsFromDocument(text)
       if (chunks.length === 0) {
@@ -92,7 +94,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           const job = createJob({
             video_name: spec.video_name,
             script_yaml: chunks[i],
-            script_path: filePath
+            script_path: filePath,
+            music_path: musicPath || undefined
           })
           broadcast({ type: 'created', job })
           queued.push(job)
@@ -186,6 +189,18 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       properties: ['openFile'],
       filters: [
         { name: 'Markdown / script document', extensions: ['md', 'markdown', 'txt', 'yml', 'yaml'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    })
+    return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0]
+  })
+
+  ipcMain.handle(IPC.PICK_AUDIO, async () => {
+    const win = getMainWindow()
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] },
         { name: 'All files', extensions: ['*'] }
       ]
     })

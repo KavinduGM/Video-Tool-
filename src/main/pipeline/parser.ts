@@ -28,6 +28,8 @@ const ALLOWED_TOP_LEVEL = new Set([
   'description',
   'colors',
   'fonts',
+  'intro',
+  'outro',
   'scenes'
 ])
 
@@ -85,6 +87,9 @@ export function parseScript(yaml: string): ScriptSpec {
 
   const style = parseStyle(r)
 
+  const intro = parseIntroOutro(r.intro, 'intro')
+  const outro = parseIntroOutro(r.outro, 'outro')
+
   if (!Array.isArray(r.scenes) || r.scenes.length === 0) {
     throw new ScriptValidationError('scenes must be a non-empty array.', 'scenes')
   }
@@ -98,8 +103,31 @@ export function parseScript(yaml: string): ScriptSpec {
     voice_profile,
     voice_speed,
     style,
+    intro,
+    outro,
     scenes
   }
+}
+
+const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen'])
+
+function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object') {
+    throw new ScriptValidationError(`${path} must be a mapping with voiceover and on_screen.`, path)
+  }
+  const o = raw as Record<string, unknown>
+  for (const k of Object.keys(o)) {
+    if (!ALLOWED_INTRO_OUTRO_KEYS.has(k)) {
+      throw new ScriptValidationError(
+        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen.`,
+        `${path}.${k}`
+      )
+    }
+  }
+  const voiceover = requireString(o, 'voiceover', `${path}.voiceover`)
+  const on_screen = requireString(o, 'on_screen', `${path}.on_screen`)
+  return { voiceover, on_screen }
 }
 
 /**

@@ -132,6 +132,34 @@ export async function muxAudioWithVideo(args: MuxArgs, onLog?: (l: string) => vo
   )
 }
 
+/**
+ * Mix a voiceover with a background-music bed. The voice stays at full volume
+ * (normalize=0 so amix does NOT attenuate it) and the music is dropped to
+ * `musicVolume` (e.g. 0.05 = 5%). The music is looped to cover the voice and
+ * the output is trimmed to the voice length. Used for intro/outro segments.
+ */
+export async function mixVoiceWithMusic(
+  args: { voiceIn: string; musicIn: string; out: string; musicVolume: number; durationSeconds: number },
+  onLog?: (l: string) => void
+): Promise<void> {
+  const vol = Math.max(0, Math.min(1, args.musicVolume))
+  await runFfmpeg(
+    [
+      '-y',
+      '-i', args.voiceIn,
+      '-stream_loop', '-1', '-i', args.musicIn, // loop music to always cover the voice
+      '-filter_complex',
+      `[1:a]volume=${vol}[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`,
+      '-map', '[a]',
+      '-t', args.durationSeconds.toFixed(3),
+      '-c:a', 'libmp3lame',
+      '-q:a', '2',
+      args.out
+    ],
+    onLog
+  )
+}
+
 export interface ConcatArgs {
   scenes: { videoPath: string; durationSeconds: number; transitionOut: Transition }[]
   out: string

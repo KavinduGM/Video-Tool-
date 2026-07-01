@@ -88,6 +88,7 @@ export function createJob(input: {
   video_name: string
   script_yaml: string
   script_path?: string
+  music_path?: string
 }): Job {
   const db = init()
   const now = Date.now()
@@ -99,6 +100,7 @@ export function createJob(input: {
     script_yaml: input.script_yaml,
     script_path: input.script_path,
     video_name: input.video_name,
+    music_path: input.music_path,
     progress: 0,
     logs: []
   }

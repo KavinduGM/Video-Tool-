@@ -21,12 +21,12 @@ const api = {
     remove: (id: string): Promise<void> => ipcRenderer.invoke(IPC.PROFILES_DELETE, id)
   },
   jobs: {
-    enqueue: (script_yaml: string): Promise<Job> =>
-      ipcRenderer.invoke(IPC.JOB_ENQUEUE, { script_yaml }),
-    enqueueFile: (filePath: string): Promise<Job> =>
-      ipcRenderer.invoke(IPC.JOB_ENQUEUE_FILE, filePath),
-    enqueueDocument: (filePath: string): Promise<DocumentEnqueueResult> =>
-      ipcRenderer.invoke(IPC.JOB_ENQUEUE_DOCUMENT, filePath),
+    enqueue: (script_yaml: string, music_path?: string): Promise<Job> =>
+      ipcRenderer.invoke(IPC.JOB_ENQUEUE, { script_yaml, music_path }),
+    enqueueFile: (filePath: string, music_path?: string): Promise<Job> =>
+      ipcRenderer.invoke(IPC.JOB_ENQUEUE_FILE, filePath, music_path),
+    enqueueDocument: (filePath: string, music_path?: string): Promise<DocumentEnqueueResult> =>
+      ipcRenderer.invoke(IPC.JOB_ENQUEUE_DOCUMENT, filePath, music_path),
     list: (): Promise<Job[]> => ipcRenderer.invoke(IPC.JOB_LIST),
     get: (id: string): Promise<Job | null> => ipcRenderer.invoke(IPC.JOB_GET, id),
     cancel: (id: string) => ipcRenderer.invoke(IPC.JOB_CANCEL, id),
@@ -44,7 +44,8 @@ const api = {
     pickFolder: (defaultPath?: string): Promise<string | null> =>
       ipcRenderer.invoke(IPC.PICK_FOLDER, defaultPath),
     pickScripts: (): Promise<string[]> => ipcRenderer.invoke(IPC.PICK_SCRIPT),
-    pickDocument: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_DOCUMENT)
+    pickDocument: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_DOCUMENT),
+    pickAudio: (): Promise<string | null> => ipcRenderer.invoke(IPC.PICK_AUDIO)
   },
   shellOpen: (target: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_PATH, target),
   template: {

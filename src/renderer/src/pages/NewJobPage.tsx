@@ -6,10 +6,18 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
+  const [music, setMusic] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.template.get().then((t) => setTemplate(t))
   }, [])
+
+  const musicArg = () => music ?? undefined
+
+  async function pickMusic() {
+    const file = await window.api.dialog.pickAudio()
+    if (file) setMusic(file)
+  }
 
   async function enqueueText() {
     setError(null)
@@ -20,7 +28,7 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
     }
     setBusy(true)
     try {
-      const job = await window.api.jobs.enqueue(yaml)
+      const job = await window.api.jobs.enqueue(yaml, musicArg())
       setOk(`Queued: ${job.video_name}`)
       setYaml('')
       setTimeout(onQueued, 300)
@@ -41,7 +49,7 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
     const failed: string[] = []
     for (const f of files) {
       try {
-        const job = await window.api.jobs.enqueueFile(f)
+        const job = await window.api.jobs.enqueueFile(f, musicArg())
         queued.push(job.video_name)
       } catch (err: any) {
         failed.push(`${f}: ${err?.message ?? err}`)
@@ -60,7 +68,7 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
     if (!file) return
     setBusy(true)
     try {
-      const { queued, errors, total } = await window.api.jobs.enqueueDocument(file)
+      const { queued, errors, total } = await window.api.jobs.enqueueDocument(file, musicArg())
       if (queued.length > 0) {
         setOk(
           `Queued ${queued.length} of ${total} script(s) from the document: ${queued
@@ -126,6 +134,19 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
           >
             Load template
           </button>
+        </div>
+        <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
+          <button className="ghost" onClick={pickMusic} disabled={busy}>
+            {music ? 'Change background music' : 'Background music (optional)'}
+          </button>
+          {music ? (
+            <span className="meta">
+              Override: <span className="mono">{music.split(/[\\/]/).pop()}</span>{' '}
+              <button className="ghost" onClick={() => setMusic(null)}>Clear</button>
+            </span>
+          ) : (
+            <span className="hint">Overrides the Settings default for these job(s). Plays under intro/outro at 5%.</span>
+          )}
         </div>
       </div>
 

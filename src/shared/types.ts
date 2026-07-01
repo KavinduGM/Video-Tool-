@@ -39,6 +39,11 @@ export interface SceneSpec {
   transition_out: Transition
 }
 
+export interface IntroOutroSpec {
+  voiceover: string
+  on_screen: string
+}
+
 export interface ScriptSpec {
   video_name: string
   ratio: AspectRatio
@@ -50,6 +55,8 @@ export interface ScriptSpec {
     colors?: string[]
     fonts?: string[]
   }
+  intro?: IntroOutroSpec
+  outro?: IntroOutroSpec
   scenes: SceneSpec[]
 }
 
@@ -67,6 +74,7 @@ export interface AppSettings {
   elevenlabs_api_key: string
   default_output_folder: string
   hyperframes_command: string // e.g. "npx hyperframes" or absolute path
+  background_music_path: string // global default music for intro/outro (5% volume)
 }
 
 export type JobStatus =
@@ -91,6 +99,7 @@ export interface Job {
   script_path?: string
   video_name: string
   output_path?: string
+  music_path?: string // optional per-job background-music override
   error?: string
   progress: number // 0..1
   current_step?: string
@@ -138,6 +147,7 @@ export const IPC = {
   PICK_FOLDER: 'dialog:pick-folder',
   PICK_SCRIPT: 'dialog:pick-script',
   PICK_DOCUMENT: 'dialog:pick-document',
+  PICK_AUDIO: 'dialog:pick-audio',
   OPEN_PATH: 'shell:open-path',
   TEMPLATE_GET: 'template:get',
   TTS_HEALTH: 'tts:health',
