@@ -31,6 +31,8 @@ const api = {
     get: (id: string): Promise<Job | null> => ipcRenderer.invoke(IPC.JOB_GET, id),
     cancel: (id: string) => ipcRenderer.invoke(IPC.JOB_CANCEL, id),
     remove: (id: string) => ipcRenderer.invoke(IPC.JOB_REMOVE, id),
+    clearHistory: (): Promise<{ ok: boolean; removed: number; keptRunning: number }> =>
+      ipcRenderer.invoke(IPC.JOB_CLEAR),
     retry: (id: string): Promise<Job | null> => ipcRenderer.invoke(IPC.JOB_RETRY, id),
     onEvent: (cb: (event: QueueEvent) => void) => {
       const handler = (_e: unknown, event: QueueEvent) => cb(event)

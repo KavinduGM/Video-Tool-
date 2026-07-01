@@ -15,9 +15,10 @@ import {
   setSettings,
   listProfiles,
   upsertProfile,
-  deleteProfile
+  deleteProfile,
+  getStoragePaths
 } from './settings'
-import { createJob, deleteJob, getJob, listJobs, resetJob, updateJob } from './db'
+import { clearJobs, createJob, deleteJob, getJob, listJobs, resetJob, updateJob } from './db'
 import { worker } from './worker'
 import { parseScript } from './pipeline/parser'
 import { ttsHealth, listVoices } from './pipeline/tts'
@@ -131,6 +132,23 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     deleteJob(id)
     broadcast({ type: 'removed', job })
     return { ok: true }
+  })
+  ipcMain.handle(IPC.JOB_CLEAR, async () => {
+    // Clear the in-app job history. Settings, API keys, voice profiles, and
+    // learned templates are stored elsewhere and are untouched. Exported videos
+    // in the user's output folder are NOT deleted — only the per-job intermediate
+    // render folders under the app workspace are cleaned up.
+    const { removed, keptRunning } = clearJobs()
+    const { workspace } = getStoragePaths()
+    for (const job of removed) {
+      broadcast({ type: 'removed', job })
+      try {
+        await fs.promises.rm(path.join(workspace, job.id), { recursive: true, force: true })
+      } catch {
+        // best-effort cleanup of temp render files
+      }
+    }
+    return { ok: true, removed: removed.length, keptRunning }
   })
   ipcMain.handle(IPC.JOB_RETRY, (_e, id: string) => {
     const job = resetJob(id)

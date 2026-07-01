@@ -130,6 +130,7 @@ export const IPC = {
   JOB_LIST: 'job:list',
   JOB_CANCEL: 'job:cancel',
   JOB_REMOVE: 'job:remove',
+  JOB_CLEAR: 'job:clear',
   JOB_RETRY: 'job:retry',
   JOB_GET: 'job:get',
   JOB_EVENT: 'job:event', // main → renderer

@@ -174,3 +174,21 @@ export function resetJob(id: string): Job | null {
     output_path: undefined
   })
 }
+
+/**
+ * Clear job history. Removes every job that isn't actively running (a running
+ * job is kept so the worker isn't pulled out from under itself). Does NOT touch
+ * settings, API keys, voice profiles, learned templates, or any exported video
+ * files on disk — only the in-app job list. Returns the removed jobs so the
+ * caller can also delete their intermediate workspace folders.
+ */
+export function clearJobs(): { removed: Job[]; keptRunning: number } {
+  const db = init()
+  const removed = db.jobs.filter((j) => j.status !== 'running').map((j) => deepClone(j))
+  const kept = db.jobs.filter((j) => j.status === 'running')
+  if (removed.length > 0) {
+    db.jobs = kept
+    persist()
+  }
+  return { removed, keptRunning: kept.length }
+}

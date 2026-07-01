@@ -4,6 +4,19 @@ import type { Job } from '../../../shared/types'
 export default function QueuePage({ jobs }: { jobs: Job[] }): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
   const selectedJob = jobs.find((j) => j.id === selected) ?? null
+  const clearableCount = jobs.filter((j) => j.status !== 'running').length
+
+  async function clearHistory() {
+    if (
+      !confirm(
+        'Clear the job history? This removes the job list and their temporary render files.\n\n' +
+          'Your settings, API keys, voice profiles, and any exported videos on disk are NOT affected. ' +
+          'A currently running job is kept.'
+      )
+    )
+      return
+    await window.api.jobs.clearHistory()
+  }
 
   return (
     <>
@@ -11,6 +24,14 @@ export default function QueuePage({ jobs }: { jobs: Job[] }): JSX.Element {
       <div className="sub">
         Videos are rendered one at a time, oldest first. Add jobs from the <span className="code-inline">New job</span> tab.
       </div>
+
+      {clearableCount > 0 && (
+        <div className="row" style={{ marginBottom: 16 }}>
+          <button className="danger" onClick={clearHistory}>
+            Clear history ({clearableCount})
+          </button>
+        </div>
+      )}
 
       {jobs.length === 0 && (
         <div className="card">
