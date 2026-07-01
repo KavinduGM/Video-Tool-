@@ -6,10 +6,18 @@ export default function SettingsPage(): JSX.Element {
   const [savedMsg, setSavedMsg] = useState<string | null>(null)
   const [ttsCheck, setTtsCheck] = useState<{ ok: boolean; detail?: string } | null>(null)
   const [checking, setChecking] = useState(false)
+  const [templateCount, setTemplateCount] = useState<number | null>(null)
 
   useEffect(() => {
     window.api.settings.get().then(setSettings)
+    window.api.templates.count().then(setTemplateCount)
   }, [])
+
+  async function clearTemplates() {
+    if (!confirm('Clear all learned scene templates? The app will re-learn them as scenes pass review on the first try.')) return
+    await window.api.templates.clear()
+    setTemplateCount(0)
+  }
 
   if (!settings) return <div className="muted">Loading…</div>
 
@@ -126,6 +134,23 @@ export default function SettingsPage(): JSX.Element {
             Usually <span className="code-inline">npx hyperframes</span>. Use an absolute path if Node/npx isn't in PATH.
           </span>
         </label>
+      </div>
+
+      <div className="card">
+        <h3>Learned scene templates</h3>
+        <div className="sub" style={{ marginBottom: 8 }}>
+          When a 9:16 scene passes visual review on the first try, its layout is saved as a reusable
+          template. If a later scene keeps failing, the app adapts the closest matching template
+          instead of re-designing from scratch.
+        </div>
+        <div className="row" style={{ alignItems: 'center' }}>
+          <div className="meta">
+            Saved templates: <span className="mono">{templateCount ?? '…'}</span>
+          </div>
+          <button className="danger" onClick={clearTemplates} disabled={!templateCount}>
+            Clear templates
+          </button>
+        </div>
       </div>
 
       <div className="row">

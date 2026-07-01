@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Job, JobLogEntry } from '@shared/types'
 import { parseScript, dimensionsForRatio } from './parser'
-import { generateSceneHtml, reviewScene, repairSceneHtml } from './claude'
+import { generateSceneHtml, reviewScene, repairSceneHtml, adaptTemplateHtml } from './claude'
+import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
 import { generateAudio } from './tts'
 import { scaffoldProject, renderHyperframes } from './hyperframes'
 import {
@@ -18,6 +19,10 @@ const MAX_VISUAL_REVIEW_ATTEMPTS = 10
 // Stop early if repairs stop reducing the issue count for this many consecutive
 // attempts — burning renders/credits on an oscillating fix helps nobody.
 const MAX_NO_PROGRESS = 2
+// After this many attempts still haven't fixed a scene, stop letting Claude
+// re-roll from scratch and instead adapt a proven template (if we have one that
+// structurally matches). "More than 5 tries" → kicks in on attempt 6.
+const TEMPLATE_FALLBACK_AFTER = 5
 
 export interface RunnerHandle {
   cancel(): void
@@ -178,13 +183,33 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       cb.onLog(info(`Scene ${i + 1}: sanitized ${gen.sanitized.length} looping construct(s).`))
     }
 
+    const sceneFeatures = computeSceneFeatures(spec.ratio, scene.explainer)
+
     const first = await renderAndReview(gen.html, `Scene ${i + 1} attempt 1/${MAX_VISUAL_REVIEW_ATTEMPTS}`, 1)
     let best = { html: gen.html, mp4: first.mp4, issues: first.issues }
     let attempt = 1
     let noProgress = 0
+    let templateTried = false
 
     if (best.issues.length === 0) {
       cb.onLog(info(`Scene ${i + 1}: visual review PASSED ✓ on first render`))
+      // First-try pass = a proven composition. Bank it as a reusable template.
+      if (first.reviewed) {
+        try {
+          const total = saveTemplate(
+            {
+              features: sceneFeatures,
+              html: gen.html,
+              videoName: spec.video_name,
+              explainerPreview: scene.explainer
+            },
+            Date.now()
+          )
+          cb.onLog(info(`Scene ${i + 1}: saved as a reusable template (${sceneFeatures.kind}, ${sceneFeatures.lineCount} line(s)); library now holds ${total}.`))
+        } catch (err: any) {
+          cb.onLog(info(`Scene ${i + 1}: could not save template — ${err.message}`))
+        }
+      }
     } else {
       cb.onLog({ ts: Date.now(), level: 'warn', message: `Scene ${i + 1} attempt 1: ${best.issues.length} issue(s):` })
       for (const issue of best.issues) cb.onLog({ ts: Date.now(), level: 'warn', message: `  • ${issue}` })
@@ -192,6 +217,50 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
 
     while (attempt < MAX_VISUAL_REVIEW_ATTEMPTS && best.issues.length > 0 && !handle.cancelled) {
       attempt++
+
+      // ---- Template fallback ----
+      // After >5 attempts still failing, stop re-rolling and adapt a proven
+      // template (one that passed on its first try and structurally matches).
+      // Try it once; if it beats the current best, adopt it and keep going.
+      if (attempt > TEMPLATE_FALLBACK_AFTER && !templateTried) {
+        templateTried = true
+        const tag = `Scene ${i + 1} template ${attempt}/${MAX_VISUAL_REVIEW_ATTEMPTS}`
+        const match = findBestTemplate(sceneFeatures)
+        if (!match) {
+          cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: no matching proven template available yet — continuing with targeted repairs.` })
+        } else {
+          cb.onProgress(baseProgress + sceneShare * 0.2, `${tag}: adapting a proven template`)
+          cb.onLog(info(`${tag}: ${best.issues.length} issue(s) unresolved after ${attempt - 1} attempts — adapting a proven "${match.template.videoName}" template (${match.template.features.kind}, ${match.template.features.lineCount} line(s)) instead of re-designing.`))
+          const adapted = await adaptTemplateHtml({
+            apiKey: settings.anthropic_api_key,
+            model: settings.claude_model,
+            templateHtml: match.template.html,
+            explainer: scene.explainer,
+            ratio: spec.ratio,
+            durationSeconds: audioDuration
+          })
+          for (const line of adapted.log) cb.onLog(info(`${tag}: ${line}`))
+          if (adapted.applied === 0) {
+            cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: could not adapt the template (no edits applied) — continuing with repairs.` })
+          } else {
+            const tr = await renderAndReview(adapted.html, tag, attempt)
+            if (tr.issues.length === 0) {
+              cb.onLog(info(`${tag}: visual review PASSED ✓ (proven template adapted to this scene)`))
+              best = { html: adapted.html, mp4: tr.mp4, issues: [] }
+              break
+            }
+            if (tr.issues.length < best.issues.length) {
+              cb.onLog(info(`${tag}: template improved the scene — issues ${best.issues.length} → ${tr.issues.length}; continuing repairs from the template version`))
+              best = { html: adapted.html, mp4: tr.mp4, issues: tr.issues }
+              noProgress = 0
+            } else {
+              cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: adapted template did not beat the current best (${best.issues.length} → ${tr.issues.length}) — keeping the previous best.` })
+            }
+          }
+          continue // template attempt consumed this slot
+        }
+      }
+
       const tag = `Scene ${i + 1} repair ${attempt}/${MAX_VISUAL_REVIEW_ATTEMPTS}`
       cb.onProgress(baseProgress + sceneShare * 0.2, `${tag}: targeted fix (${best.issues.length} issue(s))`)
       cb.onLog(info(`${tag}: requesting surgical edits for ${best.issues.length} issue(s) — patching only the affected parts, not a full rewrite`))

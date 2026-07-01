@@ -51,6 +51,10 @@ const api = {
   tts: {
     health: (): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke(IPC.TTS_HEALTH),
     voices: (): Promise<unknown> => ipcRenderer.invoke(IPC.TTS_VOICES)
+  },
+  templates: {
+    count: (): Promise<number> => ipcRenderer.invoke(IPC.TEMPLATES_COUNT),
+    clear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(IPC.TEMPLATES_CLEAR)
   }
 }
 

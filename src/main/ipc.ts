@@ -22,6 +22,7 @@ import { worker } from './worker'
 import { parseScript } from './pipeline/parser'
 import { ttsHealth, listVoices } from './pipeline/tts'
 import { extractScriptsFromDocument, sniffVideoName } from './pipeline/document'
+import { templateCount, clearTemplates } from './pipeline/templates'
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
@@ -206,6 +207,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.TTS_VOICES, async () => {
     const s = getSettings()
     return listVoices({ apiKey: s.elevenlabs_api_key })
+  })
+
+  ipcMain.handle(IPC.TEMPLATES_COUNT, () => templateCount())
+  ipcMain.handle(IPC.TEMPLATES_CLEAR, () => {
+    clearTemplates()
+    return { ok: true }
   })
 
   worker.on('event', (event: QueueEvent) => {

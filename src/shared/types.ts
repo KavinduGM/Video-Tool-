@@ -140,7 +140,10 @@ export const IPC = {
   OPEN_PATH: 'shell:open-path',
   TEMPLATE_GET: 'template:get',
   TTS_HEALTH: 'tts:health',
-  TTS_VOICES: 'tts:voices'
+  TTS_VOICES: 'tts:voices',
+  // learned scene-template library
+  TEMPLATES_COUNT: 'templates:count',
+  TEMPLATES_CLEAR: 'templates:clear'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -1035,6 +1035,115 @@ function shortEdit(e: Edit): string {
   return (e.reason || e.find).replace(/\s+/g, ' ').slice(0, 60)
 }
 
+// ====================================================================
+// TEMPLATE ADAPTATION — reuse a proven composition by swapping ONLY its
+// text to match a new scene. The template's layout, animation, structure,
+// classes and sizing are known-good (it passed review on the first try),
+// so we change as little as possible: the visible text and per-line
+// colors the new script calls for.
+// ====================================================================
+
+const ADAPT_SYSTEM = `You are adapting a PROVEN, working HTML motion-graphics template to present a NEW scene's text.
+
+The template already renders correctly — its layout, animation timing, structure, CSS classes and
+font sizes are known-good. Your ONLY job is to change the visible TEXT (and per-line colors the new
+script explicitly calls for) so the composition presents the NEW scene's content instead of the old.
+
+ABSOLUTE RULES:
+- Preserve ALL structure, animation, classes, positioning and sizing. Change text content and colors
+  only. Do NOT convert boxes to SVG strokes, do NOT restructure, do NOT re-time animations.
+- Map the new scene's lines onto the template's existing line elements in order (heading → heading,
+  body line → body line, box line → box line).
+- If the new scene has ONE more or ONE fewer line than the template, add/remove a single line element
+  by copying the exact pattern of an existing sibling (same classes/attributes) — nothing more.
+- Keep every line on ONE visual line; if a new line is longer than the old, REDUCE that line's
+  font-size so it still fits. Never let text overflow.
+
+OUTPUT FORMAT — respond with ONLY this JSON, no prose, no code fences:
+{ "edits": [ { "find": "<verbatim substring from the template HTML>", "replace": "<replacement>", "reason": "<what this swaps>" } ] }
+
+Rules for each edit (identical to a precise find/replace):
+- "find" MUST be copied VERBATIM from the template HTML and be unique (appears exactly once); add a
+  little surrounding context if a raw value repeats.
+- Keep each "find" targeted (one text node / attribute), not whole blocks.`
+
+/**
+ * Adapt a proven template's text to a new scene. Same deterministic edit-apply
+ * path as repairSceneHtml, so unchanged structure stays byte-for-byte identical.
+ */
+export async function adaptTemplateHtml(args: {
+  apiKey: string
+  model: string
+  templateHtml: string
+  explainer: string
+  ratio: AspectRatio
+  durationSeconds: number
+}): Promise<RepairResult> {
+  if (!args.apiKey) throw new Error('Anthropic API key is not set in Settings.')
+  const client = new Anthropic({ apiKey: args.apiKey })
+  const log: string[] = []
+
+  const userPrompt =
+    `Ratio: ${args.ratio}\n` +
+    `NEW scene explainer — make the template present THIS content:\n"""\n${args.explainer}\n"""\n\n` +
+    `PROVEN template HTML (copy each "find" verbatim from this; change only text/colors):\n\n` +
+    '```html\n' +
+    args.templateHtml +
+    '\n```'
+
+  const stream = client.messages.stream({
+    model: args.model || 'claude-opus-4-8',
+    max_tokens: 8000,
+    system: ADAPT_SYSTEM,
+    messages: [{ role: 'user', content: userPrompt }]
+  })
+  const resp = await stream.finalMessage()
+  const text = resp.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as Anthropic.TextBlock).text)
+    .join('')
+    .trim()
+
+  const edits = parseEdits(text)
+  if (edits.length === 0) {
+    log.push('template-adapt: model returned no usable edits')
+    return {
+      html: args.templateHtml,
+      applied: 0,
+      failed: ['no edits parsed'],
+      safeZone: args.ratio === '9:16' ? 'skipped' : 'n/a',
+      log
+    }
+  }
+
+  const { html: patched, applied, failed } = applyEdits(args.templateHtml, edits)
+  log.push(
+    `template-adapt: applied ${applied}/${edits.length} text edit(s)${failed.length ? `, ${failed.length} could not apply` : ''}`
+  )
+  for (const f of failed) log.push(`  - skipped: ${f}`)
+
+  let outHtml = patched
+  let safeZone: RepairResult['safeZone'] = 'n/a'
+  if (args.ratio === '9:16') {
+    if (applied > 0) {
+      outHtml = injectShapeAssets(outHtml)
+      const m = await measureSafeZone(outHtml, args.durationSeconds)
+      if (m.measured && !m.ok) {
+        const fit = fitHtmlToSafeZone(outHtml, m)
+        outHtml = fit.fitted ? fit.html : outHtml
+        safeZone = 'force-fitted'
+        log.push(`template-adapt: content exceeded the safe zone — applied geometric force-fit (scale ${fit.scale.toFixed(3)})`)
+      } else {
+        safeZone = m.measured ? 'ok' : 'skipped'
+      }
+    } else {
+      safeZone = 'skipped'
+    }
+  }
+
+  return { html: outHtml, applied, failed, safeZone, log }
+}
+
 function buildUserPromptForAttempt(
   args: SceneRenderArgs,
   attempt: number,
