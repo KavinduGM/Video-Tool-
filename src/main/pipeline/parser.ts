@@ -119,7 +119,7 @@ export function parseScript(yaml: string): ScriptSpec {
   }
 }
 
-const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen', 'subscribe'])
+const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen', 'subscribe', 'highlight'])
 
 function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | undefined {
   if (raw === undefined || raw === null) return undefined
@@ -130,7 +130,7 @@ function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | unde
   for (const k of Object.keys(o)) {
     if (!ALLOWED_INTRO_OUTRO_KEYS.has(k)) {
       throw new ScriptValidationError(
-        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen, subscribe.`,
+        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen, subscribe, highlight.`,
         `${path}.${k}`
       )
     }
@@ -138,7 +138,13 @@ function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | unde
   const voiceover = requireString(o, 'voiceover', `${path}.voiceover`)
   const on_screen = requireString(o, 'on_screen', `${path}.on_screen`)
   const subscribe = o.subscribe === true || o.subscribe === 'true'
-  return { voiceover, on_screen, subscribe }
+  let highlight: string[] | undefined
+  if (o.highlight !== undefined) {
+    const raw = Array.isArray(o.highlight) ? o.highlight : [o.highlight]
+    highlight = raw.map((v) => String(v).trim()).filter((v) => v.length > 0)
+    if (highlight.length === 0) highlight = undefined
+  }
+  return { voiceover, on_screen, subscribe, highlight }
 }
 
 /**

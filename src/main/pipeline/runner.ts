@@ -9,7 +9,7 @@ import {
   adaptTemplateHtml,
   buildStaticIntroOutroCard,
   buildStaticSceneCard,
-  buildSubscribeOutroCard
+  buildAnimatedIntroOutroCard
 } from './claude'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
 import { generateAudioWithTimestamps, type WordTiming } from './tts'
@@ -64,6 +64,7 @@ interface Segment {
   saveTemplates: boolean // scenes only
   mixMusic: boolean // intro/outro only
   subscribe: boolean // outro only: deterministic SUBSCRIBE button + arrow card
+  highlights?: string[] // intro/outro: extra phrases to highlight
   transitionOut: Transition
 }
 
@@ -117,7 +118,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       kind: 'intro', label: 'Intro', dirName: 'intro',
       voiceover: spec.intro.voiceover, explainer: introDesc('intro', spec.intro.on_screen),
       onScreen: spec.intro.on_screen, mode: 'intro', sceneIndex: 0, saveTemplates: false,
-      mixMusic: true, subscribe: false, transitionOut: FADE
+      mixMusic: true, subscribe: false, highlights: spec.intro.highlight, transitionOut: FADE
     })
   }
   spec.scenes.forEach((s, i) => {
@@ -134,7 +135,8 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       kind: 'outro', label: 'Outro', dirName: 'outro',
       voiceover: spec.outro.voiceover, explainer: introDesc('outro', spec.outro.on_screen),
       onScreen: spec.outro.on_screen, mode: 'outro', sceneIndex: 0, saveTemplates: false,
-      mixMusic: true, subscribe: !!spec.outro.subscribe, transitionOut: { type: 'none', duration: 0 }
+      mixMusic: true, subscribe: !!spec.outro.subscribe, highlights: spec.outro.highlight,
+      transitionOut: { type: 'none', duration: 0 }
     })
   }
 
@@ -149,15 +151,12 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     words: WordTiming[] | null
   }[] = []
 
-  // The intro's final HTML becomes a proven template for the outro (same style).
-  let introHtml: string | null = null
-
+  // Intro and outro share one style automatically: the deterministic card
+  // builder picks its preset from the video name, so both segments match.
   for (let s = 0; s < segments.length; s++) {
     if (handle.cancelled) throw new Error('Cancelled')
     const seg = segments[s]
-    const templateHtml = seg.kind === 'outro' && introHtml ? introHtml : undefined
-    const res = await produceSegment(seg, s * segShare, templateHtml)
-    if (seg.kind === 'intro') introHtml = res.html
+    const res = await produceSegment(seg, s * segShare)
     results.push({
       finalMp4: res.finalMp4,
       durationSeconds: res.durationSeconds,
@@ -251,8 +250,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
   // ================================================================
   async function produceSegment(
     seg: Segment,
-    baseProgress: number,
-    templateHtml?: string
+    baseProgress: number
   ): Promise<{
     finalMp4: string
     durationSeconds: number
@@ -295,36 +293,6 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       } catch (err: any) {
         cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: music mix failed (${err.message}) — using voiceover only.` })
       }
-    }
-
-    // --- Deterministic BRANDED SUBSCRIBE OUTRO (system-drawn, no AI) ---
-    // When outro.subscribe is set, compose the outro ourselves: the on-screen
-    // text + a SUBSCRIBE button + a red down arrow, with a controlled one-pass
-    // reveal. It always renders correctly and can never loop, so we skip the
-    // Claude generation + review loop entirely.
-    if (seg.kind === 'outro' && seg.subscribe) {
-      cb.onProgress(baseProgress + segShare * 0.35, `${seg.label}: composing branded subscribe outro`)
-      cb.onLog(info(`${seg.label}: composing a deterministic subscribe outro (SUBSCRIBE button + down arrow) — reliable, no AI generation`))
-      const html = await buildSubscribeOutroCard(seg.onScreen ?? '', audioDuration)
-      await scaffoldProject(projectDir, html)
-      if (handle.cancelled) throw new Error('Cancelled')
-      const rawMp4 = path.join(segDir, 'render_cta.mp4')
-      cb.onProgress(baseProgress + segShare * 0.5, `${seg.label}: rendering with Hyperframes`)
-      await renderHyperframes({
-        command: settings.hyperframes_command,
-        projectDir,
-        outputMp4: rawMp4,
-        onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
-      })
-      const finalMp4 = path.join(segDir, 'segment.mp4')
-      cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
-      await muxAudioWithVideo(
-        { videoIn: rawMp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: SCENE_TAIL_SECONDS },
-        (line) => cb.onLog(info(`ffmpeg: ${line}`))
-      )
-      const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
-      cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, branded subscribe outro) → ${finalMp4}`))
-      return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html, words: tts.words }
     }
 
     // Render one HTML to its own mp4 and review the final frame → issue list.
@@ -393,22 +361,26 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       return { mp4, issues, reviewed: reviewed || motionIssues.length > 0 }
     }
 
-    // Attempt 1 — either adapt the intro card as a template (outro), or generate.
-    cb.onProgress(baseProgress + segShare * 0.2, `${seg.label}: composing HTML with Claude`)
+    // Attempt 1. Intro/outro cards are composed DETERMINISTICALLY by the system
+    // (word-by-word reveal + exam-name highlight sweep + optional subscribe CTA,
+    // style preset seeded by the video name so intro & outro match). No AI in
+    // the composition, so the card is animated AND renders correctly virtually
+    // every time — Claude generation remains only as an emergency fallback.
+    cb.onProgress(baseProgress + segShare * 0.2, `${seg.label}: composing HTML`)
     let firstHtml: string | null = null
-    if (templateHtml) {
-      cb.onLog(info(`${seg.label}: adapting the proven intro card as a template (changing only the text) instead of designing from scratch`))
-      const adapted = await adaptTemplateHtml({
-        apiKey: settings.anthropic_api_key,
-        model: settings.claude_model,
-        templateHtml,
-        explainer: seg.explainer,
-        ratio: spec.ratio,
-        durationSeconds: audioDuration
-      })
-      for (const line of adapted.log) cb.onLog(info(`${seg.label}: ${line}`))
-      if (adapted.applied > 0) firstHtml = adapted.html
-      else cb.onLog(info(`${seg.label}: template adaptation produced no edits — generating fresh instead.`))
+    if (seg.mode === 'intro' || seg.mode === 'outro') {
+      try {
+        cb.onLog(info(`${seg.label}: composing a deterministic animated title card (word-by-word reveal, exam-name highlight${seg.subscribe ? ', subscribe CTA' : ''}${seg.highlights?.length ? `, extra highlights: ${seg.highlights.join(', ')}` : ''})`))
+        firstHtml = await buildAnimatedIntroOutroCard({
+          onScreen: seg.onScreen ?? '',
+          durationSeconds: audioDuration,
+          highlights: seg.highlights,
+          subscribe: seg.subscribe,
+          seed: spec.video_name
+        })
+      } catch (err: any) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: deterministic card build failed (${err.message}) — falling back to Claude generation.` })
+      }
     }
     if (!firstHtml) {
       cb.onLog(info(`${seg.label}: asking Claude (${settings.claude_model}) for HTML`))

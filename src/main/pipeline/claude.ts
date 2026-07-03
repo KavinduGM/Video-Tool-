@@ -5,6 +5,7 @@ import { dimensionsForRatio } from './parser'
 import { zoneGuideForPrompt, zoneGuideForReviewer, NINE_SIXTEEN } from '@shared/zones'
 import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback, emptyShapeFeedback } from './safezone'
 import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
+import { buildAnimatedCardHtml } from './cards'
 
 export interface SceneRenderArgs {
   apiKey: string
@@ -408,82 +409,33 @@ ${items}
 }
 
 /**
- * A deterministic, system-drawn BRANDED OUTRO: the on-screen text, a SUBSCRIBE
- * button (pill + bell), and a red down arrow — with a controlled one-pass reveal
- * (each element fades/pops in once and holds). No Claude, so it always renders
- * correctly and can never loop.
+ * The deterministic ANIMATED intro/outro card (word-by-word reveal, exam-name
+ * highlight sweep, optional subscribe CTA) — built entirely in code by
+ * cards.ts, then run through the safe-zone fit so long lines can never crop.
+ * Never throws for content reasons.
  */
-function buildSubscribeOutroHtmlRaw(onScreen: string, durationSeconds: number): string {
-  const m = NINE_SIXTEEN.margin
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const lines = onScreen
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-  const d = durationSeconds.toFixed(3)
-  const lineItems = lines
-    .map((l, i) => `      <div class="line" style="animation-delay:${(0.2 + i * 0.3).toFixed(2)}s">${esc(l)}</div>`)
-    .join('\n')
-  const btnDelay = (0.2 + lines.length * 0.3 + 0.25).toFixed(2)
-  const arrowDelay = (0.2 + lines.length * 0.3 + 0.65).toFixed(2)
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@700;800;900&display=swap" rel="stylesheet">
-<style>
-  html,body{margin:0;padding:0}
-  #stage{position:relative;width:1080px;height:1920px;overflow:hidden;background:#F4EFE6;font-family:'Poppins',system-ui,sans-serif}
-  .safe{position:absolute;left:${m.left}px;right:${m.right}px;top:${m.top}px;bottom:${m.bottom}px;
-        display:flex;flex-direction:column;align-items:center;justify-content:center;gap:52px;box-sizing:border-box}
-  .lines{display:flex;flex-direction:column;align-items:center;gap:16px}
-  .line{color:#1A1A1A;font-weight:800;font-size:66px;line-height:1.14;text-align:center;
-        overflow-wrap:normal;word-break:keep-all;max-width:100%;
-        opacity:0;animation:riseIn .55s ease-out both;animation-iteration-count:1}
-  .sub{display:inline-flex;align-items:center;gap:22px;background:#17171A;border-radius:999px;
-       padding:18px 22px 18px 40px;opacity:0;animation:pop .5s cubic-bezier(.2,.9,.3,1.2) both;
-       animation-iteration-count:1;animation-delay:${btnDelay}s}
-  .sub-label{color:#fff;font-weight:900;font-size:46px;letter-spacing:1px}
-  .sub-bell{width:74px;height:74px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}
-  .arrow{opacity:0;animation:riseIn .55s ease-out both;animation-iteration-count:1;animation-delay:${arrowDelay}s}
-  @keyframes riseIn{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
-  @keyframes pop{0%{opacity:0;transform:scale(.82)}100%{opacity:1;transform:scale(1)}}
-</style>
-</head>
-<body>
-<div id="stage" data-composition-id="main" data-width="1080" data-height="1920" data-duration="${d}">
-  <div class="safe">
-    <div class="lines">
-${lineItems}
-    </div>
-    <div class="sub">
-      <span class="sub-label">SUBSCRIBE</span>
-      <span class="sub-bell">
-        <svg viewBox="0 0 24 24" width="42" height="42" fill="#17171A" aria-hidden="true"><path d="M12 22a2.6 2.6 0 0 0 2.55-2.1h-5.1A2.6 2.6 0 0 0 12 22Zm7.3-5.2-1.7-1.75V10.9a5.7 5.7 0 0 0-4.2-5.5V4.7a1.4 1.4 0 0 0-2.8 0v.7a5.7 5.7 0 0 0-4.2 5.5v4.15L4.7 16.8A1 1 0 0 0 5.45 18.5h13.1a1 1 0 0 0 .75-1.7Z"/></svg>
-      </span>
-    </div>
-    <svg class="arrow" viewBox="0 0 120 210" width="150" height="220" aria-hidden="true">
-      <path d="M60 14 L60 158" stroke="#E8412C" stroke-width="22" stroke-linecap="round" fill="none"/>
-      <path d="M20 124 L60 176 L100 124" stroke="#E8412C" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    </svg>
-  </div>
-</div>
-</body>
-</html>`
-}
-
-/** Build + safe-zone-fit the branded subscribe outro. Never throws. */
-export async function buildSubscribeOutroCard(onScreen: string, durationSeconds: number): Promise<string> {
-  let html = buildSubscribeOutroHtmlRaw(onScreen, durationSeconds)
+export async function buildAnimatedIntroOutroCard(args: {
+  onScreen: string
+  durationSeconds: number
+  highlights?: string[]
+  subscribe?: boolean
+  seed: string
+}): Promise<string> {
+  let html = buildAnimatedCardHtml({
+    onScreen: args.onScreen,
+    durationSeconds: args.durationSeconds,
+    highlights: args.highlights,
+    subscribe: args.subscribe,
+    seed: args.seed
+  })
   try {
-    const measurement = await measureSafeZone(html, durationSeconds)
+    const measurement = await measureSafeZone(html, args.durationSeconds)
     if (measurement.measured && !measurement.ok) {
       const fit = fitHtmlToSafeZone(html, measurement)
       if (fit.fitted) html = fit.html
     }
   } catch {
-    /* best-effort */
+    /* best-effort — the raw card is conservatively sized */
   }
   return html
 }
