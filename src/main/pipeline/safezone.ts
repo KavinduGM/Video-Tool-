@@ -56,6 +56,8 @@ export interface SafeZoneMeasurement {
   offenders: SafeZoneOffender[]
   /** text elements that cross a shape's outline (text-over-box overlap) */
   overlaps: OverlapViolation[]
+  /** .hf-box / .hf-circle shapes that rendered with NO visible text inside */
+  emptyShapes: string[]
   note?: string
 }
 
@@ -141,10 +143,27 @@ function measureScript(): string {
         } else {
           bw = parseFloat(cs.strokeWidth) || parseFloat(el.getAttribute('stroke-width')) || 4
         }
-        shapes.push({ x0: x0, y0: y0, x1: x1, y1: y1, bw: bw * sx, label: isBoxClass ? (el.className || tag) : tag })
+        shapes.push({ x0: x0, y0: y0, x1: x1, y1: y1, bw: bw * sx, label: isBoxClass ? (el.className || tag) : tag, box: !!isBoxClass })
       }
     }
     if (!isFinite(minX)) return { empty: true }
+
+    // A .hf-box / .hf-circle that has NO text whose center lies inside it is an
+    // "empty shape" — the classic "box rendered but its inner lines never
+    // appeared" bug. (Decorative graphics don't use these classes, so this only
+    // flags text-container primitives that came up empty.)
+    var empties = []
+    for (var ei = 0; ei < shapes.length; ei++) {
+      var sh = shapes[ei]
+      if (!sh.box) continue
+      var hasText = false
+      for (var tj = 0; tj < texts.length; tj++) {
+        var tc = texts[tj]
+        var ccx = (tc.x0 + tc.x1) / 2, ccy = (tc.y0 + tc.y1) / 2
+        if (ccx > sh.x0 && ccx < sh.x1 && ccy > sh.y0 && ccy < sh.y1) { hasText = true; break }
+      }
+      if (!hasText) empties.push(sh.label)
+    }
 
     // Text/shape overlaps. Two cases, both flagged:
     //   (1) CONTAINMENT — a text whose center is INSIDE a shape must fit within
@@ -194,7 +213,7 @@ function measureScript(): string {
       }
     }
 
-    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, hasSafe: !!stage.querySelector('.safe'), offenders: offenders, overlaps: overlaps.slice(0, 6) }
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, hasSafe: !!stage.querySelector('.safe'), offenders: offenders, overlaps: overlaps.slice(0, 6), empties: empties.slice(0, 4) }
   })()`
 }
 
@@ -249,6 +268,7 @@ export async function measureSafeZone(
         overflow: emptyOverflow(),
         offenders: [],
         overlaps: [],
+        emptyShapes: [],
         note: data?.error ? `measure skipped: ${data.error}` : 'no measurable content'
       }
     }
@@ -294,7 +314,9 @@ export async function measureSafeZone(
       shape: String(o.shape || '')
     }))
 
-    return { ok, measured: true, hasSafeWrapper: !!data.hasSafe, content, overflow, offenders, overlaps }
+    const emptyShapes: string[] = Array.isArray(data.empties) ? data.empties.map(String) : []
+
+    return { ok, measured: true, hasSafeWrapper: !!data.hasSafe, content, overflow, offenders, overlaps, emptyShapes }
   } catch (err: any) {
     return {
       ok: true, // infra failure → skip, don't fail the job
@@ -304,6 +326,7 @@ export async function measureSafeZone(
       overflow: emptyOverflow(),
       offenders: [],
       overlaps: [],
+      emptyShapes: [],
       note: `measure error: ${err?.message ?? err}`
     }
   } finally {
@@ -410,6 +433,18 @@ export function safeZoneFeedback(m: SafeZoneMeasurement): string {
     `Offending elements: ${worst || '(unnamed)'}. ` +
     `Fix by REDUCING font-size and/or repositioning these so every element is fully inside the safe area. ` +
     `Keep everything inside the #stage > .safe container and do not let any line get wider than ${SAFE_AREA.width}px.`
+  )
+}
+
+/** Feedback for the retry prompt when a box/circle rendered with no text inside. */
+export function emptyShapeFeedback(empties: string[]): string {
+  return (
+    `EMPTY SHAPE (${empties.length}): a box/circle (${empties.join(', ')}) rendered but its inner ` +
+    `text never appeared — the shape is empty at the end. FIX: put each inner line INSIDE the ` +
+    `.hf-box / .hf-circle as a child element, give each an opacity:0 initial state and a reveal ` +
+    `(fade/write-in) that FINISHES and holds by the end — do NOT leave inner lines at opacity 0, ` +
+    `and do NOT loop the shape. Every inner line must be fully visible and static at the end. If a ` +
+    `box keeps coming out empty, put the text as plain lines WITHOUT a box instead.`
   )
 }
 

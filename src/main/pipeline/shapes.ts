@@ -172,5 +172,36 @@ export function shapeGuideForPrompt(): string {
       MIDDLE of the safe area, as a direct child of .safe (or a wrapper with no
       height limit and no overflow clipping), free to take its full height. The
       band names position TEXT LINES; a shape occupies the center and may span the
-      height of about two bands.`
+      height of about two bands.
+    - AN EMPTY BOX IS A FAILURE. If you use a .hf-box / .hf-circle, it MUST end
+      with its text fully visible inside. If you can't reliably get text to
+      reveal inside a box, use PLAIN TEXT LINES instead — a correct plain-text
+      scene always beats an empty box.
+
+EXPLAINER GRAPHICS (optional — use these to make scenes more creative & clear):
+  You are NOT limited to boxes. To explain or emphasize, you MAY add small
+  graphic elements — as long as each reveals ONCE and HOLDS (never loops):
+    - Marks & icons: check mark (✓), cross (✗), arrow (→ ↘ ↓), star (★),
+      plus/minus, a short underline or divider, a bullet dot, a simple circle
+      or highlight ring around a word.
+    - Simple diagrams / flows: 2–4 short labels connected by arrows, a small
+      step flow (A → B → C), a simple two-item comparison. Keep it clean,
+      legible, and uncluttered.
+    - A shape used WITHOUT text inside, purely as an explainer object (e.g. an
+      arrow pointing from one line to another, a circle ringing a key word, a
+      check mark beside a correct item). These do NOT count as "empty boxes" —
+      the empty-box rule is only about .hf-box / .hf-circle text containers.
+  RELIABILITY RULES for any graphic:
+    - Reveal once and hold. If you animate an SVG stroke (check mark, arrow,
+      underline), the FINAL stroke-dashoffset MUST reach 0 (fully drawn),
+      finishing by D − 0.3s. Never loop, pulse, or blink it.
+    - Prefer small, self-contained SVG icons or simple CSS shapes. Draw marks
+      with an SVG <path> (a check mark is "M x1 y1 L x2 y2 L x3 y3"); an arrow
+      is a line plus a small arrowhead. Keep them modest in size so they never
+      crowd the text.
+    - Text INSIDE a box/circle still uses .hf-box / .hf-circle (never an
+      SVG-stroked rectangle around text). SVG strokes are fine for the marks
+      and connectors above, which contain no text.
+    - Every graphic stays inside the safe area and is fully visible & static at
+      the end.`
 }

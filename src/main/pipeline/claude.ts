@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
 import { zoneGuideForPrompt, zoneGuideForReviewer } from '@shared/zones'
-import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback } from './safezone'
+import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback, emptyShapeFeedback } from './safezone'
 import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
 
 export interface SceneRenderArgs {
@@ -819,20 +819,22 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
 
         const edgeOverflow = !measurement.ok
         const overlaps = measurement.overlaps
+        const empties = measurement.emptyShapes
 
-        if (!edgeOverflow && overlaps.length === 0) {
+        if (!edgeOverflow && overlaps.length === 0 && empties.length === 0) {
           const c = measurement.content!
           log.push(
-            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], no shape overlaps)`
+            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], no shape overlaps, no empty shapes)`
           )
           return finalize(cleanHtml, sanitized, attempt, 'passed', 'ok', log)
         }
 
-        // A violation exists (edge overflow and/or text-over-shape overlap).
+        // A violation exists (edge overflow, text-over-shape overlap, or empty box).
         if (!isFinalAttempt) {
           const reasons: string[] = []
           if (edgeOverflow) reasons.push(safeZoneFeedback(measurement))
           if (overlaps.length > 0) reasons.push(overlapFeedback(overlaps))
+          if (empties.length > 0) reasons.push(emptyShapeFeedback(empties))
           lastReason = reasons.join('\n\n')
           lastHtml = cleanHtml
           const bits: string[] = []
@@ -846,6 +848,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
             )
           }
           if (overlaps.length > 0) bits.push(`${overlaps.length} text-on-outline overlap(s)`)
+          if (empties.length > 0) bits.push(`${empties.length} empty shape(s)`)
           log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${bits.join(', ')}) — regenerating with exact feedback`)
           continue
         }
@@ -867,6 +870,11 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           log.push(
             `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — ${overlaps.length} text-on-shape overlap(s) remain after ${MAX_ATTEMPTS} attempts: ` +
               overlaps.map((o) => `"${o.text}" (${o.side})`).join(', ')
+          )
+        }
+        if (empties.length > 0) {
+          log.push(
+            `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — ${empties.length} empty shape(s) remain after ${MAX_ATTEMPTS} attempts (a box rendered with no text inside). Consider using plain text instead of a box for this scene.`
           )
         }
         return finalize(outHtml, sanitized, attempt, 'passed', sz, log)
@@ -1249,7 +1257,7 @@ function buildUserPromptForAttempt(
   // measurement, OR text-over-shape overlap. Lead with the exact reason (it
   // already contains the specifics and precise pixel numbers), then add the
   // relevant reminders.
-  const isLayout = /SAFE ZONE|OVERLAPS A SHAPE/i.test(prevReason)
+  const isLayout = /SAFE ZONE|OVERLAPS A SHAPE|EMPTY SHAPE/i.test(prevReason)
   const minRequired = Math.max(0.5, args.durationSeconds - 2.0)
   const reminders = isLayout
     ? `You MUST fix this in this attempt:\n` +
