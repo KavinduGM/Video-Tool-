@@ -332,18 +332,33 @@ export async function burnSubtitles(
   )
 }
 
+/** Grid used for the per-region motion signal (row-major cells). */
+export const INK_GRID = { cols: 4, rows: 6 } as const
+
+export interface InkSample {
+  /** per-frame fraction of pixels that differ from the background */
+  global: number[]
+  /** per-frame, per-cell ink fractions (INK_GRID.cols × INK_GRID.rows, row-major) */
+  cells: number[][]
+}
+
 /**
  * Sample the rendered video at `count` evenly-spaced times and return, for each
- * sampled frame, the fraction of pixels that are "ink" (bright content on the
- * black background). This is the raw signal the motion audit uses to detect
- * looping/flicker (the ink amount oscillates) and all-at-once reveals (ink jumps
- * to full immediately). Frames are downscaled to a tiny grayscale buffer so the
- * whole thing is a single fast ffmpeg pass with no image-decoder dependency.
+ * sampled frame, the fraction of pixels that are "ink" — pixels that DIFFER from
+ * the frame's dominant luma. The dominant luma is the background, whatever its
+ * color: on a black scene ink = bright pixels, on a light intro/outro card ink =
+ * dark text. (A fixed brightness threshold made every pixel of a light card
+ * count as content, which false-flagged intros/outros as "all at once".)
+ *
+ * Also returns the same signal per GRID CELL, so the motion audit can catch a
+ * single element flickering in one region even when the global ink barely moves.
+ * Frames are downscaled to a tiny grayscale buffer so the whole thing is a
+ * single fast ffmpeg pass with no image-decoder dependency.
  */
 export async function sampleInkFractions(
   args: { videoIn: string; count: number; durationSeconds: number; workDir: string },
   onLog?: (l: string) => void
-): Promise<number[]> {
+): Promise<InkSample> {
   const W = 64
   const H = 114 // ~9:16
   const frameSize = W * H
@@ -364,15 +379,37 @@ export async function sampleInkFractions(
     )
     const buf = await fs.promises.readFile(rawPath)
     const frames = Math.floor(buf.length / frameSize)
-    const THRESH = 40 // luma above this counts as content (background is ~0)
-    const inks: number[] = []
+    const DIFF = 48 // |pixel − background| above this counts as content
+    const { cols, rows } = INK_GRID
+    const cellW = W / cols // 16
+    const cellH = H / rows // 19
+    const cellArea = cellW * cellH
+    const global: number[] = []
+    const cells: number[][] = []
     for (let f = 0; f < frames; f++) {
       const base = f * frameSize
+      // Dominant luma bin = the background (works for dark AND light cards).
+      const hist = new Uint32Array(32)
+      for (let p = 0; p < frameSize; p++) hist[buf[base + p] >> 3]++
+      let bgBin = 0
+      for (let b = 1; b < 32; b++) if (hist[b] > hist[bgBin]) bgBin = b
+      const bg = bgBin * 8 + 4
       let ink = 0
-      for (let p = 0; p < frameSize; p++) if (buf[base + p] > THRESH) ink++
-      inks.push(ink / frameSize)
+      const cellInk = new Float64Array(cols * rows)
+      for (let y = 0; y < H; y++) {
+        const rowBase = base + y * W
+        const cy = Math.min(rows - 1, Math.floor(y / cellH))
+        for (let x = 0; x < W; x++) {
+          if (Math.abs(buf[rowBase + x] - bg) > DIFF) {
+            ink++
+            cellInk[cy * cols + Math.min(cols - 1, Math.floor(x / cellW))]++
+          }
+        }
+      }
+      global.push(ink / frameSize)
+      cells.push(Array.from(cellInk, (n) => n / cellArea))
     }
-    return inks
+    return { global, cells }
   } finally {
     fs.promises.rm(rawPath, { force: true }).catch(() => {})
   }

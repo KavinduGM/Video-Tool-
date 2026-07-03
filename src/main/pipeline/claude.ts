@@ -488,6 +488,93 @@ export async function buildSubscribeOutroCard(onScreen: string, durationSeconds:
   return html
 }
 
+/** Force the #stage data-duration to a specific value (first occurrence). */
+export function patchStageDuration(html: string, durationSeconds: number): string {
+  return html.replace(
+    /(\bdata-duration\s*=\s*["'])[\d.]+(["'])/,
+    `$1${durationSeconds.toFixed(3)}$2`
+  )
+}
+
+function hexLuma(hex: string): number | null {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 16)
+  return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
+}
+
+/**
+ * A deterministic, guaranteed-safe STATIC SCENE card — the last resort when the
+ * animated scene still LOOPS after every repair attempt. It extracts the quoted
+ * on-screen lines from the explainer and renders them stacked and centered in
+ * the scene's own palette and handwriting font, held for the whole duration.
+ * No animation → physically cannot loop. Returns null when the explainer has no
+ * quoted lines to show.
+ */
+export async function buildStaticSceneCard(
+  explainer: string,
+  style: ScriptSpec['style'] | undefined,
+  durationSeconds: number
+): Promise<string | null> {
+  const lines = Array.from(explainer.matchAll(/"([^"\n]{2,80})"/g))
+    .map((m) => m[1].trim())
+    .filter(Boolean)
+    .slice(0, 8)
+  if (lines.length === 0) return null
+
+  const colors = (style?.colors ?? []).filter((c) => hexLuma(c) !== null)
+  // Background: the first dark color in the palette (scenes use dark canvases).
+  const bg = colors.find((c) => (hexLuma(c) as number) < 80) ?? '#000000'
+  const bgLuma = hexLuma(bg) as number
+  // Accent for the heading: a palette color that clearly separates from the
+  // background and isn't near-white (that's the body color's job).
+  const accent =
+    colors.find(
+      (c) => c !== bg && Math.abs((hexLuma(c) as number) - bgLuma) > 90 && (hexLuma(c) as number) < 230
+    ) ?? '#F5C842'
+  const fontName = style?.fonts?.[0] ?? 'Caveat'
+  const fontParam = fontName.trim().replace(/\s+/g, '+')
+
+  const m = NINE_SIXTEEN.margin
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const items = lines
+    .map((l, i) => `      <div class="line${i === 0 ? ' head' : ''}">${esc(l)}</div>`)
+    .join('\n')
+  const d = durationSeconds.toFixed(3)
+  let html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=${fontParam}:wght@700&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0}
+  #stage{position:relative;width:1080px;height:1920px;overflow:hidden;background:${bg};font-family:'${fontName}',cursive}
+  .safe{position:absolute;left:${m.left}px;right:${m.right}px;top:${m.top}px;bottom:${m.bottom}px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;gap:44px}
+  .line{color:#FFFFFF;font-weight:700;font-size:58px;line-height:1.2;text-align:center;white-space:nowrap;overflow-wrap:normal;word-break:keep-all;max-width:100%}
+  .head{color:${accent};font-size:84px}
+</style>
+</head>
+<body>
+<div id="stage" data-composition-id="main" data-width="1080" data-height="1920" data-duration="${d}">
+  <div class="safe">
+${items}
+  </div>
+</div>
+</body>
+</html>`
+  try {
+    const measurement = await measureSafeZone(html, durationSeconds)
+    if (measurement.measured && !measurement.ok) {
+      const fit = fitHtmlToSafeZone(html, measurement)
+      if (fit.fitted) html = fit.html
+    }
+  } catch {
+    /* best-effort — the raw card is conservatively sized */
+  }
+  return html
+}
+
 /**
  * Build the static card and run it through the deterministic safe-zone fit so it
  * is guaranteed to sit inside the safe area even if a line is long. Never throws.
@@ -1274,8 +1361,14 @@ font sizes are known-good. Your ONLY job is to change the visible TEXT (and per-
 script explicitly calls for) so the composition presents the NEW scene's content instead of the old.
 
 ABSOLUTE RULES:
-- Preserve ALL structure, animation, classes, positioning and sizing. Change text content and colors
-  only. Do NOT convert boxes to SVG strokes, do NOT restructure, do NOT re-time animations.
+- Preserve ALL structure, classes, positioning, sizing and the animation STYLE. Change text content
+  and colors only. Do NOT convert boxes to SVG strokes and do NOT restructure.
+- DURATION: the user message states the template's ORIGINAL duration and the NEW scene's duration.
+  If they differ, you MUST also retime: edit the #stage data-duration attribute to the NEW duration,
+  and edit any animation delay/start/duration values that would still be running past
+  (NEW duration − 0.3s) so EVERY animation finishes by then. Keep the same reveal ORDER and pacing
+  feel; a calm static hold after the last reveal is fine when the new scene is longer. Never leave
+  an animation mid-flight at the end — it freezes half-drawn/faded.
 - Map the new scene's lines onto the template's existing line elements in order (heading → heading,
   body line → body line, box line → box line).
 - If the new scene has ONE more or ONE fewer line than the template, add/remove a single line element
@@ -1307,10 +1400,17 @@ export async function adaptTemplateHtml(args: {
   const client = new Anthropic({ apiKey: args.apiKey })
   const log: string[] = []
 
+  const oldDurMatch = /data-duration\s*=\s*["']([\d.]+)["']/.exec(args.templateHtml)
+  const oldDur = oldDurMatch ? parseFloat(oldDurMatch[1]) : null
+  const newDur = args.durationSeconds
+
   const userPrompt =
     `Ratio: ${args.ratio}\n` +
+    `DURATION: the template was authored for ${oldDur !== null ? oldDur.toFixed(2) : 'an unknown'}s; ` +
+    `the NEW scene runs ${newDur.toFixed(2)}s. Include edits that set data-duration to ${newDur.toFixed(3)} ` +
+    `and retime any animation delay/start/duration values so every animation FINISHES by ${(newDur - 0.3).toFixed(2)}s.\n\n` +
     `NEW scene explainer — make the template present THIS content:\n"""\n${args.explainer}\n"""\n\n` +
-    `PROVEN template HTML (copy each "find" verbatim from this; change only text/colors):\n\n` +
+    `PROVEN template HTML (copy each "find" verbatim from this; change only text/colors/timing):\n\n` +
     '```html\n' +
     args.templateHtml +
     '\n```'
@@ -1347,6 +1447,20 @@ export async function adaptTemplateHtml(args: {
   for (const f of failed) log.push(`  - skipped: ${f}`)
 
   let outHtml = patched
+  if (applied > 0) {
+    // Deterministic guarantee: the adapted card renders at the NEW duration even
+    // if the model forgot to edit data-duration. Then verify the retimed
+    // animations still fit the new timeline and surface any mismatch in the log
+    // (the render/review loop + fallbacks handle it downstream).
+    outHtml = patchStageDuration(outHtml, newDur)
+    log.push(`template-adapt: data-duration set to ${newDur.toFixed(3)}s (template was ${oldDur !== null ? oldDur.toFixed(2) + 's' : 'unknown'})`)
+    const cov = validateAnimationCoverage(outHtml, newDur)
+    if (cov.ok) {
+      log.push(`template-adapt: animation coverage OK for the new duration (last start ${cov.maxStartSeconds.toFixed(2)}s, latest end ${cov.maxEndSeconds.toFixed(2)}s)`)
+    } else {
+      log.push(`template-adapt: WARNING — retimed template may not fit the new duration: ${cov.reason ?? 'unknown'}`)
+    }
+  }
   let safeZone: RepairResult['safeZone'] = 'n/a'
   if (args.ratio === '9:16') {
     if (applied > 0) {

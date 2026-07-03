@@ -8,6 +8,7 @@ import {
   repairSceneHtml,
   adaptTemplateHtml,
   buildStaticIntroOutroCard,
+  buildStaticSceneCard,
   buildSubscribeOutroCard
 } from './claude'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
@@ -24,7 +25,7 @@ import {
   sampleInkFractions,
   ensureDir
 } from './ffmpeg'
-import { analyzeMotion } from './motion'
+import { analyzeMotion, isLoopIssue } from './motion'
 import { getSettings, findProfileByName, findMusicByName, getStoragePaths } from '../settings'
 
 const MAX_VISUAL_REVIEW_ATTEMPTS = 10
@@ -354,11 +355,12 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       let motionIssues: string[] = []
       cb.onProgress(baseProgress + segShare * 0.55, `${tag}: motion audit`)
       try {
-        const inks = await sampleInkFractions({ videoIn: mp4, count: 16, durationSeconds: audioDuration, workDir: segDir }, () => {})
-        const verdict = analyzeMotion(inks)
+        const sample = await sampleInkFractions({ videoIn: mp4, count: 16, durationSeconds: audioDuration, workDir: segDir }, () => {})
+        const verdict = analyzeMotion(sample)
         motionIssues = verdict.issues
         if (verdict.issues.length > 0) {
-          cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: motion audit found ${verdict.loop ? 'LOOPING/FLICKER' : ''}${verdict.loop && verdict.allAtOnce ? ' + ' : ''}${verdict.allAtOnce ? 'NO-STAGGER (all at once)' : ''}.` })
+          const loopWhere = verdict.loopRegions.length > 0 ? ` in the ${verdict.loopRegions.slice(0, 3).join(', ')} region(s)` : ''
+          cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: motion audit found ${verdict.loop ? `LOOPING/FLICKER${loopWhere}` : ''}${verdict.loop && verdict.allAtOnce ? ' + ' : ''}${verdict.allAtOnce ? 'NO-STAGGER (all at once)' : ''}.` })
         } else if (!verdict.blank) {
           cb.onLog(info(`${tag}: motion audit OK — progressive reveal, no looping.`))
         }
@@ -541,6 +543,38 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           cb.onLog({ ts: Date.now(), level: 'warn', message: `${tag}: no progress for ${MAX_NO_PROGRESS} attempts — stopping to save renders/credits.` })
           break
         }
+      }
+    }
+
+    // STATIC SCENE FALLBACK. A looping scene is the one defect worse than a
+    // static one — if after every repair attempt the best version STILL loops,
+    // ship a deterministic static composition of the scene's quoted lines (in
+    // the script's own palette and font) instead. No animation → cannot loop.
+    if (seg.kind === 'scene' && best.issues.some(isLoopIssue)) {
+      cb.onLog({
+        ts: Date.now(),
+        level: 'warn',
+        message: `${seg.label}: the best version still LOOPS after ${attempt} attempt(s) — falling back to a clean STATIC composition of the scene's text (a calm still beats a flickering scene).`
+      })
+      try {
+        const staticHtml = await buildStaticSceneCard(seg.explainer, spec.style, audioDuration)
+        if (staticHtml) {
+          await scaffoldProject(projectDir, staticHtml)
+          if (handle.cancelled) throw new Error('Cancelled')
+          const staticMp4 = path.join(segDir, 'render_static.mp4')
+          await renderHyperframes({
+            command: settings.hyperframes_command,
+            projectDir,
+            outputMp4: staticMp4,
+            onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
+          })
+          best = { html: staticHtml, mp4: staticMp4, issues: [] }
+          cb.onLog(info(`${seg.label}: static scene rendered — all lines visible and held for the full duration.`))
+        } else {
+          cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: no quoted lines found in the explainer for a static fallback — keeping the animated best.` })
+        }
+      } catch (err: any) {
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: static scene fallback failed (${err.message}) — using the best animated version.` })
       }
     }
 
