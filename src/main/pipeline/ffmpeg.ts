@@ -17,9 +17,9 @@ function resolveBinary(p: string): string {
 const FFMPEG = resolveBinary(ffmpegPath as unknown as string)
 const FFPROBE = resolveBinary((ffprobeStatic as any).path as string)
 
-export function runFfmpeg(args: string[], onLog?: (line: string) => void): Promise<void> {
+export function runFfmpeg(args: string[], onLog?: (line: string) => void, cwd?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(FFMPEG, args, { windowsHide: true })
+    const p = spawn(FFMPEG, args, { windowsHide: true, cwd })
     let stderrTail = ''
     p.stderr.on('data', (chunk) => {
       const text = chunk.toString()
@@ -303,6 +303,33 @@ function mapTransitionToXfade(t: TransitionType): string | null {
 
 export function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true })
+}
+
+/**
+ * Burn an ASS subtitle file into a video. The ass filter's filename argument
+ * chokes on Windows drive-letter colons, so we run ffmpeg with cwd set to the
+ * subtitle's directory and pass just the bare filename — no escaping needed.
+ * Audio is copied untouched.
+ */
+export async function burnSubtitles(
+  args: { videoIn: string; assDir: string; assFile: string; out: string },
+  onLog?: (l: string) => void
+): Promise<void> {
+  await runFfmpeg(
+    [
+      '-y',
+      '-i', args.videoIn,
+      '-vf', `ass=${args.assFile}`,
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'medium',
+      '-crf', '20',
+      '-c:a', 'copy',
+      args.out
+    ],
+    onLog,
+    args.assDir
+  )
 }
 
 /**

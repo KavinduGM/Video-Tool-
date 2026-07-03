@@ -24,6 +24,7 @@ const ALLOWED_TOP_LEVEL = new Set([
   'voice_profile',
   'voice_speed',
   'background_music',
+  'captions',
   'style',
   // Style fields are also accepted at the top level for ergonomics.
   'description',
@@ -89,6 +90,9 @@ export function parseScript(yaml: string): ScriptSpec {
   const background_music =
     r.background_music !== undefined ? requireString(r, 'background_music') : undefined
 
+  // Captions are ON unless explicitly disabled with `captions: false`.
+  const captions = r.captions === false || r.captions === 'false' ? false : undefined
+
   const style = parseStyle(r)
 
   const intro = parseIntroOutro(r.intro, 'intro')
@@ -107,6 +111,7 @@ export function parseScript(yaml: string): ScriptSpec {
     voice_profile,
     voice_speed,
     background_music,
+    captions,
     style,
     intro,
     outro,

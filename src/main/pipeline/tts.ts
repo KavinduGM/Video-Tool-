@@ -210,6 +210,120 @@ export async function generateAudio(cfg: TtsConfig, args: GenerateArgs): Promise
   }
 }
 
+// ====================================================================
+// TTS WITH WORD TIMESTAMPS — used for the burned-in karaoke captions.
+// ElevenLabs' /with-timestamps endpoint returns the audio plus per-
+// character alignment, from which we derive exact per-word timings.
+// Deterministic (no speech recognition), so highlights land precisely.
+// ====================================================================
+
+export interface WordTiming {
+  text: string
+  start: number // seconds, relative to this audio clip
+  end: number
+}
+
+export async function generateAudioWithTimestamps(
+  cfg: TtsConfig,
+  args: GenerateArgs
+): Promise<{ words: WordTiming[] | null; note?: string }> {
+  if (!cfg.apiKey) {
+    throw new Error('ElevenLabs API key is empty. Open Settings and fill it in.')
+  }
+  if (!args.profile.voice_id) {
+    throw new Error(
+      `Voice profile "${args.profile.name}" has no ElevenLabs voice_id. Edit the profile and paste the ID from elevenlabs.io → Voices.`
+    )
+  }
+
+  const url = `${ELEVENLABS_BASE}/v1/text-to-speech/${encodeURIComponent(args.profile.voice_id)}/with-timestamps?output_format=mp3_44100_128`
+  const requestedSpeed = args.speedOverride ?? args.profile.default_speed ?? 1.0
+  const speed = clamp(Number(requestedSpeed) || 1.0, MIN_SPEED, MAX_SPEED)
+  const body = {
+    text: args.text,
+    model_id: ELEVENLABS_MODEL_ID,
+    voice_settings: {
+      stability: 0.5,
+      similarity_boost: 0.75,
+      style: 0,
+      use_speaker_boost: true,
+      speed
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000)
+  try {
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'xi-api-key': cfg.apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      })
+    } catch (err: any) {
+      throw unwrapFetchError(err, url)
+    }
+    if (!res.ok) {
+      // The timestamps endpoint failed — fall back to the plain endpoint so the
+      // job still produces audio; captions just won't cover this segment.
+      const detail = (await safeReadText(res)).slice(0, 300)
+      await generateAudio(cfg, args)
+      return { words: null, note: `timestamps endpoint HTTP ${res.status} (${detail}) — audio generated without word timings` }
+    }
+    const json = (await res.json()) as {
+      audio_base64?: string
+      alignment?: {
+        characters?: string[]
+        character_start_times_seconds?: number[]
+        character_end_times_seconds?: number[]
+      }
+    }
+    if (!json.audio_base64) {
+      await generateAudio(cfg, args)
+      return { words: null, note: 'timestamps response had no audio — regenerated without timings' }
+    }
+    await fs.promises.writeFile(args.outPath, Buffer.from(json.audio_base64, 'base64'))
+
+    const a = json.alignment
+    if (
+      !a ||
+      !Array.isArray(a.characters) ||
+      !Array.isArray(a.character_start_times_seconds) ||
+      !Array.isArray(a.character_end_times_seconds)
+    ) {
+      return { words: null, note: 'no alignment data in the response — captions will skip this segment' }
+    }
+    return { words: wordsFromAlignment(a.characters, a.character_start_times_seconds, a.character_end_times_seconds) }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/** Fold per-character alignment into per-word timings (split on whitespace). */
+export function wordsFromAlignment(chars: string[], starts: number[], ends: number[]): WordTiming[] {
+  const words: WordTiming[] = []
+  let cur = ''
+  let curStart = 0
+  let lastEnd = 0
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i]
+    if (/\s/.test(c)) {
+      if (cur) {
+        words.push({ text: cur, start: curStart, end: lastEnd })
+        cur = ''
+      }
+    } else {
+      if (!cur) curStart = starts[i] ?? lastEnd
+      cur += c
+      lastEnd = ends[i] ?? lastEnd
+    }
+  }
+  if (cur) words.push({ text: cur, start: curStart, end: lastEnd })
+  return words
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n))
 }

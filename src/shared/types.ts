@@ -52,6 +52,7 @@ export interface ScriptSpec {
   voice_profile: string // display name of saved profile
   voice_speed?: number
   background_music?: string // name of a saved music profile (intro/outro bed)
+  captions?: boolean // burned-in karaoke captions (default true)
   style?: {
     description?: string
     colors?: string[]

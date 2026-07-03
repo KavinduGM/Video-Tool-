@@ -11,13 +11,15 @@ import {
   buildSubscribeOutroCard
 } from './claude'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
-import { generateAudio } from './tts'
+import { generateAudioWithTimestamps, type WordTiming } from './tts'
+import { mergeExamTokens, buildAss } from './captions'
 import { scaffoldProject, renderHyperframes } from './hyperframes'
 import {
   concatScenesWithTransitions,
   extractFrame,
   muxAudioWithVideo,
   mixVoiceWithMusic,
+  burnSubtitles,
   probeDurationSeconds,
   sampleInkFractions,
   ensureDir
@@ -139,7 +141,12 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
   // Roughly: 60% segments (split equally), 30% concat, 10% finalize.
   const segShare = 0.6 / totalSegments
 
-  const results: { finalMp4: string; durationSeconds: number; transitionOut: Transition }[] = []
+  const results: {
+    finalMp4: string
+    durationSeconds: number
+    transitionOut: Transition
+    words: WordTiming[] | null
+  }[] = []
 
   // The intro's final HTML becomes a proven template for the outro (same style).
   let introHtml: string | null = null
@@ -150,7 +157,12 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     const templateHtml = seg.kind === 'outro' && introHtml ? introHtml : undefined
     const res = await produceSegment(seg, s * segShare, templateHtml)
     if (seg.kind === 'intro') introHtml = res.html
-    results.push({ finalMp4: res.finalMp4, durationSeconds: res.durationSeconds, transitionOut: res.transitionOut })
+    results.push({
+      finalMp4: res.finalMp4,
+      durationSeconds: res.durationSeconds,
+      transitionOut: res.transitionOut,
+      words: res.words
+    })
   }
 
   cb.onLog(info(`All ${totalSegments} segment(s) saved. Beginning final concatenation…`))
@@ -161,6 +173,13 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
   const safeName = spec.video_name.replace(/[\\/:*?"<>|]/g, '_')
   const finalPath = uniquePath(path.join(spec.output_folder, `${safeName}.mp4`))
 
+  // Captions are burned onto the concatenated video, so with captions on we
+  // concat to a temp file first, then burn subtitles into the final output.
+  const captionsEnabled = spec.captions !== false
+  const segmentsWithWords = results.filter((r) => r.words && r.words.length > 0).length
+  const doCaptions = captionsEnabled && segmentsWithWords > 0
+  const concatOut = doCaptions ? path.join(jobWorkDir, 'concat.mp4') : finalPath
+
   await concatScenesWithTransitions(
     {
       scenes: results.map((r) => ({
@@ -168,13 +187,58 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
         durationSeconds: r.durationSeconds,
         transitionOut: r.transitionOut
       })),
-      out: finalPath,
+      out: concatOut,
       width: dims.width,
       height: dims.height,
       fps: 30
     },
     (line) => cb.onLog(info(`ffmpeg: ${line}`))
   )
+
+  if (doCaptions) {
+    // Each segment's word times are relative to its own audio. Compute every
+    // segment's start offset within the final video, replicating the concat
+    // math: a fade/dissolve OVERLAPS the two adjacent segments, so each
+    // transition shortens the timeline by its duration.
+    cb.onProgress(0.85, 'Burning captions')
+    if (segmentsWithWords < results.length) {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Captions: ${results.length - segmentsWithWords} segment(s) had no word timings and will show no captions.` })
+    }
+    const captionSegments: { units: ReturnType<typeof mergeExamTokens>; offset: number }[] = []
+    let cum = 0
+    for (let i = 0; i < results.length; i++) {
+      let offset = 0
+      if (i === 0) {
+        offset = 0
+        cum = results[0].durationSeconds
+      } else {
+        const trans = results[i - 1].transitionOut
+        const fade =
+          trans.type !== 'none'
+            ? Math.min(trans.duration, results[i].durationSeconds, cum)
+            : 0
+        offset = cum - fade
+        cum = cum + results[i].durationSeconds - fade
+      }
+      const words = results[i].words
+      if (words && words.length > 0) {
+        captionSegments.push({ units: mergeExamTokens(words), offset })
+      }
+    }
+    const assPath = path.join(jobWorkDir, 'captions.ass')
+    await fs.promises.writeFile(assPath, buildAss(captionSegments), 'utf8')
+    cb.onLog(info(`Captions: burning karaoke captions (${captionSegments.reduce((n, s) => n + s.units.length, 0)} word unit(s)) into the final video`))
+    try {
+      await burnSubtitles(
+        { videoIn: concatOut, assDir: jobWorkDir, assFile: 'captions.ass', out: finalPath },
+        (line) => cb.onLog(info(`ffmpeg: ${line}`))
+      )
+    } catch (err: any) {
+      // Never lose the video because of captions — ship the uncaptioned cut.
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Captions burn failed (${err.message}) — saving the video without captions.` })
+      await fs.promises.copyFile(concatOut, finalPath)
+    }
+  }
 
   cb.onProgress(1, 'Done')
   cb.onLog(info(`Saved final video to ${finalPath}`))
@@ -188,7 +252,13 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     seg: Segment,
     baseProgress: number,
     templateHtml?: string
-  ): Promise<{ finalMp4: string; durationSeconds: number; transitionOut: Transition; html: string }> {
+  ): Promise<{
+    finalMp4: string
+    durationSeconds: number
+    transitionOut: Transition
+    html: string
+    words: WordTiming[] | null
+  }> {
     const segDir = path.join(jobWorkDir, seg.dirName)
     ensureDir(segDir)
     const projectDir = path.join(segDir, 'hyperframes')
@@ -197,10 +267,15 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     cb.onProgress(baseProgress + segShare * 0.0, `${seg.label}: generating audio`)
     cb.onLog(info(`${seg.label}: generating audio with ElevenLabs Turbo v2 (voice=${profile!.name})`))
     const audioPath = path.join(segDir, 'audio.mp3')
-    await generateAudio(
+    const tts = await generateAudioWithTimestamps(
       { apiKey: settings.elevenlabs_api_key },
       { text: seg.voiceover, profile: profile!, speedOverride: spec.voice_speed, outPath: audioPath }
     )
+    if (tts.words) {
+      cb.onLog(info(`${seg.label}: got word timings for ${tts.words.length} word(s) — captions will cover this segment`))
+    } else {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: no word timings (${tts.note ?? 'unknown'}) — captions will skip this segment.` })
+    }
     const audioDuration = await probeDurationSeconds(audioPath)
     cb.onLog(info(`${seg.label}: audio is ${audioDuration.toFixed(2)}s`))
     if (handle.cancelled) throw new Error('Cancelled')
@@ -248,7 +323,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       )
       const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
       cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, branded subscribe outro) → ${finalMp4}`))
-      return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html }
+      return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html, words: tts.words }
     }
 
     // Render one HTML to its own mp4 and review the final frame → issue list.
@@ -512,7 +587,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
     cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, ${attempt} review attempt${attempt === 1 ? '' : 's'}) → ${finalMp4}`))
 
-    return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html: best.html }
+    return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html: best.html, words: tts.words }
   }
 }
 
