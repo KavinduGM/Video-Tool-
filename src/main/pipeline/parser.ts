@@ -114,7 +114,7 @@ export function parseScript(yaml: string): ScriptSpec {
   }
 }
 
-const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen'])
+const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen', 'subscribe'])
 
 function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | undefined {
   if (raw === undefined || raw === null) return undefined
@@ -125,14 +125,15 @@ function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | unde
   for (const k of Object.keys(o)) {
     if (!ALLOWED_INTRO_OUTRO_KEYS.has(k)) {
       throw new ScriptValidationError(
-        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen.`,
+        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen, subscribe.`,
         `${path}.${k}`
       )
     }
   }
   const voiceover = requireString(o, 'voiceover', `${path}.voiceover`)
   const on_screen = requireString(o, 'on_screen', `${path}.on_screen`)
-  return { voiceover, on_screen }
+  const subscribe = o.subscribe === true || o.subscribe === 'true'
+  return { voiceover, on_screen, subscribe }
 }
 
 /**

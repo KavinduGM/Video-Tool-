@@ -42,6 +42,7 @@ export interface SceneSpec {
 export interface IntroOutroSpec {
   voiceover: string
   on_screen: string
+  subscribe?: boolean // outro only: system-drawn SUBSCRIBE button + down arrow
 }
 
 export interface ScriptSpec {

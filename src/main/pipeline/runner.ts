@@ -7,7 +7,8 @@ import {
   reviewScene,
   repairSceneHtml,
   adaptTemplateHtml,
-  buildStaticIntroOutroCard
+  buildStaticIntroOutroCard,
+  buildSubscribeOutroCard
 } from './claude'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
 import { generateAudio } from './tts'
@@ -59,6 +60,7 @@ interface Segment {
   sceneIndex: number // for scene prompts; 0 for intro/outro
   saveTemplates: boolean // scenes only
   mixMusic: boolean // intro/outro only
+  subscribe: boolean // outro only: deterministic SUBSCRIBE button + arrow card
   transitionOut: Transition
 }
 
@@ -112,14 +114,14 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       kind: 'intro', label: 'Intro', dirName: 'intro',
       voiceover: spec.intro.voiceover, explainer: introDesc('intro', spec.intro.on_screen),
       onScreen: spec.intro.on_screen, mode: 'intro', sceneIndex: 0, saveTemplates: false,
-      mixMusic: true, transitionOut: FADE
+      mixMusic: true, subscribe: false, transitionOut: FADE
     })
   }
   spec.scenes.forEach((s, i) => {
     segments.push({
       kind: 'scene', label: `Scene ${i + 1}/${sceneCount}`, dirName: `scene_${i + 1}`,
       voiceover: s.voiceover, explainer: s.explainer, mode: 'scene', sceneIndex: i,
-      saveTemplates: true, mixMusic: false, transitionOut: s.transition_out
+      saveTemplates: true, mixMusic: false, subscribe: false, transitionOut: s.transition_out
     })
   })
   if (spec.outro) {
@@ -129,7 +131,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       kind: 'outro', label: 'Outro', dirName: 'outro',
       voiceover: spec.outro.voiceover, explainer: introDesc('outro', spec.outro.on_screen),
       onScreen: spec.outro.on_screen, mode: 'outro', sceneIndex: 0, saveTemplates: false,
-      mixMusic: true, transitionOut: { type: 'none', duration: 0 }
+      mixMusic: true, subscribe: !!spec.outro.subscribe, transitionOut: { type: 'none', duration: 0 }
     })
   }
 
@@ -217,6 +219,36 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       } catch (err: any) {
         cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: music mix failed (${err.message}) — using voiceover only.` })
       }
+    }
+
+    // --- Deterministic BRANDED SUBSCRIBE OUTRO (system-drawn, no AI) ---
+    // When outro.subscribe is set, compose the outro ourselves: the on-screen
+    // text + a SUBSCRIBE button + a red down arrow, with a controlled one-pass
+    // reveal. It always renders correctly and can never loop, so we skip the
+    // Claude generation + review loop entirely.
+    if (seg.kind === 'outro' && seg.subscribe) {
+      cb.onProgress(baseProgress + segShare * 0.35, `${seg.label}: composing branded subscribe outro`)
+      cb.onLog(info(`${seg.label}: composing a deterministic subscribe outro (SUBSCRIBE button + down arrow) — reliable, no AI generation`))
+      const html = await buildSubscribeOutroCard(seg.onScreen ?? '', audioDuration)
+      await scaffoldProject(projectDir, html)
+      if (handle.cancelled) throw new Error('Cancelled')
+      const rawMp4 = path.join(segDir, 'render_cta.mp4')
+      cb.onProgress(baseProgress + segShare * 0.5, `${seg.label}: rendering with Hyperframes`)
+      await renderHyperframes({
+        command: settings.hyperframes_command,
+        projectDir,
+        outputMp4: rawMp4,
+        onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
+      })
+      const finalMp4 = path.join(segDir, 'segment.mp4')
+      cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
+      await muxAudioWithVideo(
+        { videoIn: rawMp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: SCENE_TAIL_SECONDS },
+        (line) => cb.onLog(info(`ffmpeg: ${line}`))
+      )
+      const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
+      cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, branded subscribe outro) → ${finalMp4}`))
+      return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html }
     }
 
     // Render one HTML to its own mp4 and review the final frame → issue list.
