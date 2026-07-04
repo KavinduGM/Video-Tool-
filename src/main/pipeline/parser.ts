@@ -25,6 +25,8 @@ const ALLOWED_TOP_LEVEL = new Set([
   'voice_speed',
   'background_music',
   'captions',
+  'channel',
+  'template_set',
   'style',
   // Style fields are also accepted at the top level for ergonomics.
   'description',
@@ -93,6 +95,10 @@ export function parseScript(yaml: string): ScriptSpec {
   // Captions are ON unless explicitly disabled with `captions: false`.
   const captions = r.captions === false || r.captions === 'false' ? false : undefined
 
+  const channel = r.channel !== undefined ? requireString(r, 'channel') : undefined
+  const template_set =
+    r.template_set !== undefined ? requireNumber(r, 'template_set', 1, 50) : undefined
+
   const style = parseStyle(r)
 
   const intro = parseIntroOutro(r.intro, 'intro')
@@ -112,6 +118,8 @@ export function parseScript(yaml: string): ScriptSpec {
     voice_speed,
     background_music,
     captions,
+    channel,
+    template_set,
     style,
     intro,
     outro,
@@ -119,7 +127,7 @@ export function parseScript(yaml: string): ScriptSpec {
   }
 }
 
-const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen', 'subscribe', 'highlight'])
+const ALLOWED_INTRO_OUTRO_KEYS = new Set(['voiceover', 'on_screen', 'subscribe', 'highlight', 'scene1', 'scene2'])
 
 function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | undefined {
   if (raw === undefined || raw === null) return undefined
@@ -130,13 +138,12 @@ function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | unde
   for (const k of Object.keys(o)) {
     if (!ALLOWED_INTRO_OUTRO_KEYS.has(k)) {
       throw new ScriptValidationError(
-        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen, subscribe, highlight.`,
+        `Unknown ${path} key "${k}". Allowed: voiceover, on_screen, subscribe, highlight, scene1, scene2.`,
         `${path}.${k}`
       )
     }
   }
   const voiceover = requireString(o, 'voiceover', `${path}.voiceover`)
-  const on_screen = requireString(o, 'on_screen', `${path}.on_screen`)
   const subscribe = o.subscribe === true || o.subscribe === 'true'
   let highlight: string[] | undefined
   if (o.highlight !== undefined) {
@@ -144,7 +151,30 @@ function parseIntroOutro(raw: unknown, path: string): ScriptSpec['intro'] | unde
     highlight = raw.map((v) => String(v).trim()).filter((v) => v.length > 0)
     if (highlight.length === 0) highlight = undefined
   }
-  return { voiceover, on_screen, subscribe, highlight }
+
+  // 2-scene story template: scene1 + scene2 must come together. When present,
+  // on_screen becomes optional (derived, so fallbacks like the static card
+  // still have the full text to work with).
+  const hasS1 = o.scene1 !== undefined
+  const hasS2 = o.scene2 !== undefined
+  if (hasS1 !== hasS2) {
+    throw new ScriptValidationError(
+      `${path} must define BOTH scene1 and scene2 (or neither — then use on_screen).`,
+      path
+    )
+  }
+  let scene1: string | undefined
+  let scene2: string | undefined
+  let on_screen: string
+  if (hasS1 && hasS2) {
+    scene1 = requireString(o, 'scene1', `${path}.scene1`)
+    scene2 = requireString(o, 'scene2', `${path}.scene2`)
+    on_screen =
+      o.on_screen !== undefined ? requireString(o, 'on_screen', `${path}.on_screen`) : `${scene1}\n${scene2}`
+  } else {
+    on_screen = requireString(o, 'on_screen', `${path}.on_screen`)
+  }
+  return { voiceover, on_screen, subscribe, highlight, scene1, scene2 }
 }
 
 /**

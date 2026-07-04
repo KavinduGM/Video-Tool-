@@ -9,8 +9,10 @@ import {
   adaptTemplateHtml,
   buildStaticIntroOutroCard,
   buildStaticSceneCard,
-  buildAnimatedIntroOutroCard
+  buildAnimatedIntroOutroCard,
+  buildStoryIntroOutroCard
 } from './claude'
+import { pickStorySet } from './storycards'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
 import { generateAudioWithTimestamps, type WordTiming } from './tts'
 import { mergeExamTokens, buildAss } from './captions'
@@ -69,6 +71,8 @@ interface Segment {
   mixMusic: boolean // intro/outro only
   subscribe: boolean // outro only: deterministic SUBSCRIBE button + arrow card
   highlights?: string[] // intro/outro: extra phrases to highlight
+  scene1?: string // 2-scene story template text (with scene2)
+  scene2?: string
   transitionOut: Transition
 }
 
@@ -122,7 +126,8 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       kind: 'intro', label: 'Intro', dirName: 'intro',
       voiceover: spec.intro.voiceover, explainer: introDesc('intro', spec.intro.on_screen),
       onScreen: spec.intro.on_screen, mode: 'intro', sceneIndex: 0, saveTemplates: false,
-      mixMusic: true, subscribe: false, highlights: spec.intro.highlight, transitionOut: FADE
+      mixMusic: true, subscribe: false, highlights: spec.intro.highlight,
+      scene1: spec.intro.scene1, scene2: spec.intro.scene2, transitionOut: FADE
     })
   }
   spec.scenes.forEach((s, i) => {
@@ -140,6 +145,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       voiceover: spec.outro.voiceover, explainer: introDesc('outro', spec.outro.on_screen),
       onScreen: spec.outro.on_screen, mode: 'outro', sceneIndex: 0, saveTemplates: false,
       mixMusic: true, subscribe: !!spec.outro.subscribe, highlights: spec.outro.highlight,
+      scene1: spec.outro.scene1, scene2: spec.outro.scene2,
       transitionOut: { type: 'none', duration: 0 }
     })
   }
@@ -352,6 +358,51 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
         audioForMux = mixedPath
       } catch (err: any) {
         cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: music mix failed (${err.message}) — using voiceover only.` })
+      }
+    }
+
+    // --- 2-SCENE STORY TEMPLATE CARD (deterministic, storyboard style) ---
+    // When the script provides scene1 + scene2 for an intro/outro, compose the
+    // 2-scene template card entirely in code: badge + hook + hero image, scene
+    // swap, statement/CTA + subscribe + arrow. Deterministic and pre-fitted to
+    // the safe zone, so it renders once with NO AI review (the intentional
+    // scene swap would false-trigger the motion audit's loop detector).
+    if ((seg.mode === 'intro' || seg.mode === 'outro') && seg.scene1 && seg.scene2) {
+      try {
+        const storySet = pickStorySet(spec.video_name, spec.template_set)
+        cb.onProgress(baseProgress + segShare * 0.35, `${seg.label}: composing story template card`)
+        cb.onLog(info(`${seg.label}: composing 2-scene story template card (set ${storySet.id} "${storySet.name}"${spec.channel ? `, badge "${spec.channel}"` : ''}${seg.subscribe ? ', subscribe CTA' : ''}) — deterministic, review skipped`))
+        const html = await buildStoryIntroOutroCard({
+          kind: seg.mode,
+          scene1: seg.scene1,
+          scene2: seg.scene2,
+          badge: spec.channel,
+          subscribe: seg.subscribe,
+          durationSeconds: audioDuration,
+          set: storySet
+        })
+        await scaffoldProject(projectDir, html)
+        if (handle.cancelled) throw new Error('Cancelled')
+        const rawMp4 = path.join(segDir, 'render_story.mp4')
+        cb.onProgress(baseProgress + segShare * 0.55, `${seg.label}: rendering with Hyperframes`)
+        await renderHyperframes({
+          command: settings.hyperframes_command,
+          projectDir,
+          outputMp4: rawMp4,
+          onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
+        })
+        const finalMp4 = path.join(segDir, 'segment.mp4')
+        cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
+        await muxAudioWithVideo(
+          { videoIn: rawMp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: SCENE_TAIL_SECONDS },
+          (line) => cb.onLog(info(`ffmpeg: ${line}`))
+        )
+        const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
+        cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, story template set "${storySet.name}") → ${finalMp4}`))
+        return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html, words: tts.words }
+      } catch (err: any) {
+        if (handle.cancelled) throw err
+        cb.onLog({ ts: Date.now(), level: 'warn', message: `${seg.label}: story template card failed (${err.message}) — falling back to the single-card animated intro/outro.` })
       }
     }
 

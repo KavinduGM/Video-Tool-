@@ -47,6 +47,10 @@ export interface IntroOutroSpec {
   subscribe?: boolean // outro only: system-drawn SUBSCRIBE button + down arrow
   /** extra phrases to highlight; the first on_screen line (the exam name) is always highlighted */
   highlight?: string[]
+  /** 2-scene story template: text for scene 1 (both scene1 & scene2 required together) */
+  scene1?: string
+  /** 2-scene story template: text for scene 2 */
+  scene2?: string
 }
 
 export interface ScriptSpec {
@@ -57,6 +61,8 @@ export interface ScriptSpec {
   voice_speed?: number
   background_music?: string // name of a saved music profile (intro/outro bed)
   captions?: boolean // burned-in karaoke captions (default true)
+  channel?: string // channel name — shown as the badge chip on story intros
+  template_set?: number // force a specific story template set (otherwise hash-picked)
   style?: {
     description?: string
     colors?: string[]

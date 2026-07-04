@@ -6,6 +6,7 @@ import { zoneGuideForPrompt, zoneGuideForReviewer, NINE_SIXTEEN } from '@shared/
 import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback, emptyShapeFeedback } from './safezone'
 import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
 import { buildAnimatedCardHtml } from './cards'
+import { buildStoryCardHtml, type StorySet } from './storycards'
 
 export interface SceneRenderArgs {
   apiKey: string
@@ -406,6 +407,42 @@ ${items}
 </div>
 </body>
 </html>`
+}
+
+/**
+ * The deterministic 2-scene STORY template card (storyboard style: badge +
+ * hook + hero image → statement + image / CTA) — built entirely in code by
+ * storycards.ts, then run through the safe-zone fit. Never throws for
+ * content reasons; throws only when scene texts are missing.
+ */
+export async function buildStoryIntroOutroCard(args: {
+  kind: 'intro' | 'outro'
+  scene1: string
+  scene2: string
+  badge?: string
+  subscribe?: boolean
+  durationSeconds: number
+  set: StorySet
+}): Promise<string> {
+  let html = buildStoryCardHtml({
+    kind: args.kind,
+    scene1: args.scene1,
+    scene2: args.scene2,
+    badge: args.badge,
+    subscribe: args.subscribe,
+    durationSeconds: args.durationSeconds,
+    set: args.set
+  })
+  try {
+    const measurement = await measureSafeZone(html, args.durationSeconds)
+    if (measurement.measured && !measurement.ok) {
+      const fit = fitHtmlToSafeZone(html, measurement)
+      if (fit.fitted) html = fit.html
+    }
+  } catch {
+    /* best-effort — the raw card is conservatively sized */
+  }
+  return html
 }
 
 /**
