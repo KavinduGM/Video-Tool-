@@ -98,6 +98,10 @@ export interface CardLayout {
   padTop: number
   /** per-card text alignment override (default: the set's align) */
   textAlign?: 'left' | 'right' | 'center'
+  /** fixed scene-text font size (px), measured from the storyboard — overrides the length tiers */
+  fontPx?: number
+  /** badge chip font size (px) when the storyboard uses an oversized badge */
+  badgeFontPx?: number
   hero?: HeroLayout
 }
 
@@ -176,13 +180,26 @@ export const STORY_SETS: StorySet[] = [
     assets: { intro1: 'house', intro2: 'key', outro1: 'bulb' }, // svg fallback only
     assetMode: 'image',
     imageSlots: STD_SLOTS,
-    // Tuned 1:1 from the Set-3 storyboard: hand+keys bleeds off the LEFT edge
-    // under an upper-left text block; hand+house bleeds off the TOP-RIGHT with
-    // the text lower-right; the scale sits bottom-center under a top heading;
-    // the CTA card is centered with the curved arrow.
+    // INTRO measured 1:1 from the Set-3 intro storyboard (panel fractions →
+    // 1080×1920, hero tops are safe-relative): oversized badge top-left at
+    // abs y≈344 (font ≈88px), title at abs y≈589 (≈114px); the hand+keys
+    // strip sits at abs y 1150–1590 with the arm bleeding off the RIGHT
+    // edge; scene 2's hand+house is huge (top abs y≈130, sleeve bleeding
+    // off the LEFT edge) with the text lower-right at abs y≈1140 (≈96px).
+    // Outro layouts are pending their own fine-tune pass.
     layouts: {
-      intro1: { padTop: 430, hero: { w: 860, h: 520, x: 'left-bleed', bleed: 150, bottom: 0 } },
-      intro2: { padTop: 950, textAlign: 'right', hero: { w: 840, h: 540, x: 'right-bleed', bleed: 150, top: -120 } },
+      intro1: {
+        padTop: 200,
+        fontPx: 114,
+        badgeFontPx: 88,
+        hero: { w: 920, h: 460, x: 'right-bleed', bleed: 40, top: 990 }
+      },
+      intro2: {
+        padTop: 980,
+        textAlign: 'right',
+        fontPx: 96,
+        hero: { w: 1010, h: 800, x: 'left-bleed', bleed: 30, top: -30 }
+      },
       outro1: { padTop: 20, hero: { w: 620, h: 750, x: 'center', bottom: -20 } },
       outro2: { padTop: 430, textAlign: 'center' }
     }
@@ -639,9 +656,15 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
     ? '.sc2 .txt{text-decoration:underline;text-decoration-thickness:6px;text-underline-offset:12px}'
     : ''
 
+  // Oversized storyboard badges: per-card badgeFontPx scales the pill's font,
+  // padding and radius together (the badge only appears on intro scene 1).
+  const badgeFontPx = set.layouts?.intro1?.badgeFontPx
+  const badgeSizeCss = badgeFontPx
+    ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.24)}px ${Math.round(badgeFontPx * 0.55)}px;border-radius:${Math.round(badgeFontPx * 0.3)}px;`
+    : ''
   const badgeHtml =
     spec.kind === 'intro' && spec.badge
-      ? `<div class="badge" style="animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
+      ? `<div class="badge" style="${badgeSizeCss}animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
       : ''
 
   // Per-card layouts: the set's storyboard-tuned overrides on top of the
@@ -651,8 +674,12 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const layoutFor = (card: CardKey): CardLayout => set.layouts?.[card] ?? DEFAULT_CARD_LAYOUTS[card]
   const heroFor = (slot: 'intro1' | 'intro2' | 'outro1', box: HeroLayout): string => {
     const href = spec.images?.[slot]
+    // Push the image toward the bleeding edge inside its slot box, so the cut
+    // side (arm/sleeve) actually touches the frame edge like the storyboard —
+    // object-fit would otherwise center it and leave a gap.
+    const justify = box.x === 'right-bleed' ? 'flex-end' : box.x === 'left-bleed' ? 'flex-start' : 'center'
     return href
-      ? `<div class="imgslot" style="width:${box.w}px;height:${box.h}px"><img src="${href}" alt=""/></div>`
+      ? `<div class="imgslot" style="width:${box.w}px;height:${box.h}px;justify-content:${justify}"><img src="${href}" alt=""/></div>`
       : assetSvg(set.assets[slot], Math.round(Math.min(box.w, box.h) * 0.95))
   }
   const heroAbs = (slot: 'intro1' | 'intro2' | 'outro1', delay: number): string => {
@@ -762,11 +789,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
-      <div class="txt" style="font-size:${textSizeFor(spec.scene1)}px">${s1.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card1).fontPx ?? textSizeFor(spec.scene1)}px">${s1.html}</div>
       ${hero1Abs}
     </div>
     <div class="scene sc2" style="${sceneStyle(card2)}">
-      <div class="txt" style="font-size:${textSizeFor(spec.scene2)}px;margin-top:60px">${s2.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card2).fontPx ?? textSizeFor(spec.scene2)}px;margin-top:60px">${s2.html}</div>
       ${spec.kind === 'intro' ? hero2Html : ctaHtml}
     </div>
   </div>
