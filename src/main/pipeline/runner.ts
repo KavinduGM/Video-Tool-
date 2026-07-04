@@ -44,6 +44,9 @@ const MAX_NO_PROGRESS = 2
 const TEMPLATE_FALLBACK_AFTER = 5
 // Each segment gets a 1-second held-frame tail (audio padded with silence).
 const SCENE_TAIL_SECONDS = 1.0
+// Short tail for segments a wipe transition rides over — the 0.3s entry
+// crossfade starts almost immediately after the voice ends.
+const WIPE_ENTRY_TAIL_SECONDS = 0.35
 // Background music level under the intro/outro.
 const MUSIC_VOLUME = 0.05
 const FADE: Transition = { type: 'fade', duration: 0.5 }
@@ -361,6 +364,14 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       }
     }
 
+    // Tail length: segments that feed INTO a wipe transition (the intro, and
+    // the last scene when an outro follows) get a SHORT tail, so the
+    // transition sweeps in the moment the voice ends — no frozen dead time
+    // before the wipe. Everything else keeps the full breathing tail.
+    const feedsWipe =
+      seg.mode === 'intro' || (seg.mode === 'scene' && !!spec.outro && seg.sceneIndex === sceneCount - 1)
+    const tailHold = feedsWipe ? WIPE_ENTRY_TAIL_SECONDS : SCENE_TAIL_SECONDS
+
     // --- 2-SCENE STORY TEMPLATE CARD (deterministic, storyboard style) ---
     // When the script provides scene1 + scene2 for an intro/outro, compose the
     // 2-scene template card entirely in code: badge + hook + hero image, scene
@@ -432,12 +443,12 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           onLog: (line) => cb.onLog(info(`hyperframes: ${line}`))
         })
         const finalMp4 = path.join(segDir, 'segment.mp4')
-        cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
+        cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${tailHold}s tail`)
         await muxAudioWithVideo(
-          { videoIn: rawMp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: SCENE_TAIL_SECONDS },
+          { videoIn: rawMp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: tailHold },
           (line) => cb.onLog(info(`ffmpeg: ${line}`))
         )
-        const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
+        const totalSeconds = audioDuration + tailHold
         cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, story template set "${storySet.name}") → ${finalMp4}`))
         return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html, words: tts.words }
       } catch (err: any) {
@@ -735,13 +746,13 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
     }
 
     // Mux audio (voiceover, or voice+music for intro/outro) + held-frame tail.
-    cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${SCENE_TAIL_SECONDS}s tail`)
+    cb.onProgress(baseProgress + segShare * 0.85, `${seg.label}: muxing audio + ${tailHold}s tail`)
     const finalMp4 = path.join(segDir, 'segment.mp4')
     await muxAudioWithVideo(
-      { videoIn: best.mp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: SCENE_TAIL_SECONDS },
+      { videoIn: best.mp4, audioIn: audioForMux, out: finalMp4, durationSeconds: audioDuration, tailHoldSeconds: tailHold },
       (line) => cb.onLog(info(`ffmpeg: ${line}`))
     )
-    const totalSeconds = audioDuration + SCENE_TAIL_SECONDS
+    const totalSeconds = audioDuration + tailHold
     cb.onLog(info(`✓ ${seg.label} saved (${totalSeconds.toFixed(2)}s, ${attempt} review attempt${attempt === 1 ? '' : 's'}) → ${finalMp4}`))
 
     return { finalMp4, durationSeconds: totalSeconds, transitionOut: seg.transitionOut, html: best.html, words: tts.words }

@@ -344,11 +344,16 @@ export interface TransitionStyle {
   colors: string[]
 }
 
+// Brand palette rule: transition layers use ONLY blue grades (sky, royal,
+// navy) and yellow grades — no other hues. Video is encoded limited-range
+// (luma gaps shrink ×0.86), so at least one layer pair per style keeps a
+// FULL-RANGE luma gap >65 — proven to register in the deterministic clip
+// review on real renders.
 export const TRANSITION_STYLES: TransitionStyle[] = [
   { name: 'diag-blue', join: 'diag_wipe', xfade: 'diagbl', colors: ['0x6BB6FF', '0x2653F1', '0x0F1D5C'] },
-  { name: 'diag-sunset', join: 'diag_wipe', xfade: 'diagbl', colors: ['0xFFC53D', '0xFF6B5E', '0x3A1230'] },
-  { name: 'circle-sun', join: 'circle_open', xfade: 'circleopen', colors: ['0xE3C93F', '0x3D9BF0'] },
-  { name: 'circle-berry', join: 'circle_open', xfade: 'circleopen', colors: ['0xF4F1EA', '0xE85D75'] }
+  { name: 'diag-gold', join: 'diag_wipe', xfade: 'diagbl', colors: ['0xFFD84D', '0x2653F1', '0x0F1D5C'] },
+  { name: 'circle-sun', join: 'circle_open', xfade: 'circleopen', colors: ['0xE8D44D', '0x1F5FD6'] },
+  { name: 'circle-sky', join: 'circle_open', xfade: 'circleopen', colors: ['0x8FC7FF', '0x14275E'] }
 ]
 
 /**
@@ -416,11 +421,14 @@ export async function buildWipeTransitionClip(
   let filter = buildWipeFilterGraph(d, args.style.xfade, colors.length)
   if (args.whooshPath) {
     inputs.push('-i', args.whooshPath)
-    // Trim/pad the whoosh to the clip length with a short fade-out so an abrupt
-    // sample end never clicks.
+    // Lock the whoosh EXACTLY to the transition window: strip any leading
+    // silence baked into the sample (so the sound starts the instant the
+    // transition starts), trim to the clip length, and end with a short
+    // fade-out that finishes precisely at the clip end — no spill, no click.
     filter +=
-      `;[${audioIdx}:a]atrim=0:${d.toFixed(3)},aformat=channel_layouts=stereo:sample_rates=48000,` +
-      `afade=t=out:st=${Math.max(0, d - 0.2).toFixed(3)}:d=0.2,apad=whole_dur=${d.toFixed(3)}[aw]`
+      `;[${audioIdx}:a]silenceremove=start_periods=1:start_threshold=-40dB,` +
+      `atrim=0:${d.toFixed(3)},aformat=channel_layouts=stereo:sample_rates=48000,` +
+      `afade=t=out:st=${Math.max(0, d - 0.15).toFixed(3)}:d=0.15,apad=whole_dur=${d.toFixed(3)}[aw]`
     audioMap = '[aw]'
   } else {
     inputs.push('-f', 'lavfi', '-t', d.toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000')
