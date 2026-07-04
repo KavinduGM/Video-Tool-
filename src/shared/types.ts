@@ -178,7 +178,9 @@ export const IPC = {
   TTS_VOICES: 'tts:voices',
   // learned scene-template library
   TEMPLATES_COUNT: 'templates:count',
-  TEMPLATES_CLEAR: 'templates:clear'
+  TEMPLATES_CLEAR: 'templates:clear',
+  // fast intro/outro design preview (no TTS, no AI — story card render only)
+  PREVIEW_CARD: 'preview:card'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -51,6 +51,29 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
     }
   }
 
+  async function previewCard(part: 'intro' | 'outro') {
+    setError(null)
+    setOk(null)
+    if (!yaml.trim()) {
+      setError('Paste a script first — the preview reads the ' + part + " section's scene1/scene2 and template_set.")
+      return
+    }
+    if (typeof window.api?.preview?.card !== 'function') {
+      setError('Preview not loaded yet. Fully quit and restart the app ("npm run dev") — preview lives in the preload script, which only updates on a full restart.')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await window.api.preview.card(yaml, part)
+      if (res.ok) setOk(res.message)
+      else setError(res.message)
+    } catch (err: any) {
+      setError('Preview failed: ' + (err?.message ?? String(err)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function enqueueText() {
     setError(null)
     setOk(null)
@@ -166,6 +189,16 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
           >
             Load template
           </button>
+          <button className="secondary" onClick={() => previewCard('intro')} disabled={busy}>
+            {busy ? 'Working…' : 'Preview intro'}
+          </button>
+          <button className="secondary" onClick={() => previewCard('outro')} disabled={busy}>
+            {busy ? 'Working…' : 'Preview outro'}
+          </button>
+        </div>
+        <div className="hint" style={{ marginTop: 6 }}>
+          Preview renders ONLY the intro/outro template card (silent, ~30s, zero API credits) and
+          opens the mp4 — perfect for checking a template design without running the whole video.
         </div>
         <div
           onDragOver={(e) => e.preventDefault()}

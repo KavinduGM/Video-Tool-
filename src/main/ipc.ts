@@ -27,6 +27,9 @@ import { parseScript } from './pipeline/parser'
 import { ttsHealth, listVoices } from './pipeline/tts'
 import { extractScriptsFromDocument, sniffVideoName } from './pipeline/document'
 import { templateCount, clearTemplates } from './pipeline/templates'
+import { pickStorySet, STORY_SETS } from './pipeline/storycards'
+import { buildStoryIntroOutroCard } from './pipeline/claude'
+import { scaffoldProject, renderHyperframes } from './pipeline/hyperframes'
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
@@ -228,6 +231,91 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       await shell.openPath(path.dirname(target))
     }
   })
+
+  // ---- Fast intro/outro DESIGN PREVIEW -----------------------------------
+  // Renders ONLY the story template card for the given part — no ElevenLabs,
+  // no Claude, no music, no captions. Duration is estimated from the
+  // voiceover word count so the timings resemble the real video. Costs zero
+  // API credits and finishes in ~30s; opens the preview mp4's folder when done.
+  ipcMain.handle(
+    IPC.PREVIEW_CARD,
+    async (_e, args: { script_yaml: string; part: 'intro' | 'outro' }): Promise<{ ok: boolean; message: string; path?: string }> => {
+      try {
+        const spec = parseScript(args.script_yaml)
+        const io = args.part === 'intro' ? spec.intro : spec.outro
+        if (!io) return { ok: false, message: `The script has no ${args.part} section.` }
+        if (!io.scene1 || !io.scene2) {
+          return { ok: false, message: `The ${args.part} has no scene1/scene2 — the story template preview needs both.` }
+        }
+
+        // Estimate the voiceover duration (~2.4 words/sec, clamped 6–14s).
+        const words = io.voiceover.trim().split(/\s+/).filter(Boolean).length
+        const durationSeconds = Math.min(14, Math.max(6, words / 2.4))
+
+        // Same set + image resolution logic as the runner.
+        const availableImageSets = STORY_SETS.filter((s) => s.assetMode === 'image')
+          .filter((s) => {
+            const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${s.id}`)
+            const slots = s.imageSlots!
+            return (
+              fs.existsSync(path.join(dir, slots.intro1)) &&
+              fs.existsSync(path.join(dir, slots.intro2)) &&
+              fs.existsSync(path.join(dir, slots.outro1))
+            )
+          })
+          .map((s) => s.id)
+        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
+
+        let images: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
+        const assetCopies: { src: string; name: string }[] = []
+        if (storySet.assetMode === 'image') {
+          const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+          const slots = storySet.imageSlots!
+          const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
+            args.part === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
+          images = {}
+          for (const slot of needed) {
+            const full = path.join(assetDir, slots[slot])
+            if (fs.existsSync(full)) {
+              images[slot] = `assets/${slots[slot]}`
+              assetCopies.push({ src: full, name: slots[slot] })
+            } else if (slot !== 'outro2' && !storySet.svgFallbackOk) {
+              return { ok: false, message: `Template image missing: ${full} — add the PNG and preview again.` }
+            }
+          }
+        }
+
+        const html = await buildStoryIntroOutroCard({
+          kind: args.part,
+          scene1: io.scene1,
+          scene2: io.scene2,
+          badge: spec.channel,
+          subscribe: args.part === 'outro' ? !!io.subscribe : false,
+          durationSeconds,
+          set: storySet,
+          images
+        })
+
+        const previewDir = path.join(getStoragePaths().workspace, `preview-${randomUUID().slice(0, 8)}`)
+        const projectDir = path.join(previewDir, 'project')
+        await scaffoldProject(projectDir, html)
+        for (const a of assetCopies) {
+          await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
+        }
+        const out = path.join(previewDir, `${args.part}_set${storySet.id}_preview.mp4`)
+        const settings = getSettings()
+        await renderHyperframes({ command: settings.hyperframes_command, projectDir, outputMp4: out, onLog: () => {} })
+        shell.showItemInFolder(out)
+        return {
+          ok: true,
+          message: `Preview rendered with set ${storySet.id} "${storySet.name}" (${durationSeconds.toFixed(1)}s, silent — design check only).`,
+          path: out
+        }
+      } catch (err: any) {
+        return { ok: false, message: `Preview failed: ${err?.message ?? err}` }
+      }
+    }
+  )
 
   ipcMain.handle(IPC.TEMPLATE_GET, async () => {
     const candidates = [

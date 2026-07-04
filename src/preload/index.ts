@@ -64,6 +64,10 @@ const api = {
     }
   },
   shellOpen: (target: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_PATH, target),
+  preview: {
+    card: (script_yaml: string, part: 'intro' | 'outro'): Promise<{ ok: boolean; message: string; path?: string }> =>
+      ipcRenderer.invoke(IPC.PREVIEW_CARD, { script_yaml, part })
+  },
   template: {
     get: (): Promise<string> => ipcRenderer.invoke(IPC.TEMPLATE_GET)
   },
