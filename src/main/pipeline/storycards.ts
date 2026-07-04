@@ -102,7 +102,18 @@ export interface CardLayout {
   fontPx?: number
   /** badge chip font size (px) when the storyboard uses an oversized badge */
   badgeFontPx?: number
+  /** extra left padding on the card (px) when the storyboard insets content past the safe edge */
+  padLeft?: number
   hero?: HeroLayout
+}
+
+/**
+ * The measured storyboard font, gently shrunk for texts longer than the
+ * storyboard's (~30 chars) so per-video lines wrap like the board instead of
+ * overflowing. Short texts render at the exact measured size.
+ */
+export function effectiveFontPx(fontPx: number, text: string): number {
+  return Math.min(fontPx, Math.round((fontPx * 30) / Math.max(30, text.length)))
 }
 
 /** Generic storyboard layout: text at the top, hero large and bottom-center. */
@@ -188,17 +199,22 @@ export const STORY_SETS: StorySet[] = [
     // off the LEFT edge) with the text lower-right at abs y≈1140 (≈96px).
     // Outro layouts are pending their own fine-tune pass.
     layouts: {
+      // Measured from the user's exact 1080×1920 design frames:
+      // badge y=298 font≈100 · title y≈560 font≈130 · hand strip abs
+      // y 1227–1766 cut AT the right edge · scene-2 image abs y 247–947
+      // bleeding left · scene-2 text top≈1171 font≈138 right-aligned.
       intro1: {
-        padTop: 200,
-        fontPx: 114,
-        badgeFontPx: 88,
-        hero: { w: 920, h: 460, x: 'right-bleed', bleed: 40, top: 990 }
+        padTop: 140,
+        padLeft: 16,
+        fontPx: 130,
+        badgeFontPx: 100,
+        hero: { w: 900, h: 550, x: 'right-bleed', bleed: 20, top: 1067 }
       },
       intro2: {
-        padTop: 980,
+        padTop: 990,
         textAlign: 'right',
-        fontPx: 96,
-        hero: { w: 1010, h: 800, x: 'left-bleed', bleed: 30, top: -30 }
+        fontPx: 138,
+        hero: { w: 1030, h: 700, x: 'left-bleed', bleed: 20, top: 87 }
       },
       outro1: { padTop: 20, hero: { w: 620, h: 750, x: 'center', bottom: -20 } },
       outro2: { padTop: 430, textAlign: 'center' }
@@ -660,7 +676,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // padding and radius together (the badge only appears on intro scene 1).
   const badgeFontPx = set.layouts?.intro1?.badgeFontPx
   const badgeSizeCss = badgeFontPx
-    ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.24)}px ${Math.round(badgeFontPx * 0.55)}px;border-radius:${Math.round(badgeFontPx * 0.3)}px;`
+    ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.3)}px ${Math.round(badgeFontPx * 0.5)}px;border-radius:${Math.round(badgeFontPx * 0.44)}px;`
     : ''
   const badgeHtml =
     spec.kind === 'intro' && spec.badge
@@ -710,7 +726,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
         : a === 'right'
           ? 'text-align:right;align-items:flex-end;'
           : 'text-align:center;align-items:center;'
-    return `padding-top:${l.padTop}px;${alignCssCard}`
+    return `padding-top:${l.padTop}px;${l.padLeft ? `padding-left:${l.padLeft}px;` : ''}${alignCssCard}`
   }
 
   // Outro scene 2: optional small hero above the pill (set 1's jeep) — the
@@ -789,11 +805,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
-      <div class="txt" style="font-size:${layoutFor(card1).fontPx ?? textSizeFor(spec.scene1)}px">${s1.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1) : textSizeFor(spec.scene1)}px">${s1.html}</div>
       ${hero1Abs}
     </div>
     <div class="scene sc2" style="${sceneStyle(card2)}">
-      <div class="txt" style="font-size:${layoutFor(card2).fontPx ?? textSizeFor(spec.scene2)}px;margin-top:60px">${s2.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2) : textSizeFor(spec.scene2)}px;margin-top:60px">${s2.html}</div>
       ${spec.kind === 'intro' ? hero2Html : ctaHtml}
     </div>
   </div>
