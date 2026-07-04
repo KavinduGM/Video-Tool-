@@ -27,6 +27,7 @@ export type TransitionType =
   | 'wipe_right'
   | 'wipe_up'
   | 'wipe_down'
+  | 'diag_wipe' // internal: layered diagonal wipe used at intro/outro joins
 
 export interface Transition {
   type: TransitionType
@@ -86,6 +87,7 @@ export interface AppSettings {
   default_output_folder: string
   hyperframes_command: string // e.g. "npx hyperframes" or absolute path
   background_music_path: string // global default music for intro/outro (5% volume)
+  transition_sound_path: string // whoosh SFX for the intro/outro wipe transition
 }
 
 export type JobStatus =

@@ -52,20 +52,43 @@ export default function SettingsPage(): JSX.Element {
     }
   }
 
-  function onMusicDrop(e: React.DragEvent) {
+  function audioDropPath(e: React.DragEvent): string | null {
     e.preventDefault()
     const f = e.dataTransfer.files?.[0]
-    if (!f) return
+    if (!f) return null
     const p = window.api.getPathForFile?.(f) || (f as unknown as { path?: string }).path || ''
     if (!p) {
       alert('Could not read the dropped file path — use the “Choose…” button instead.')
-      return
+      return null
     }
     if (!/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(p)) {
       alert('Please drop an audio file (mp3, wav, m4a, aac, ogg, or flac).')
+      return null
+    }
+    return p
+  }
+
+  function onMusicDrop(e: React.DragEvent) {
+    const p = audioDropPath(e)
+    if (p) update('background_music_path', p)
+  }
+
+  function onWhooshDrop(e: React.DragEvent) {
+    const p = audioDropPath(e)
+    if (p) update('transition_sound_path', p)
+  }
+
+  async function pickWhoosh() {
+    if (typeof window.api?.dialog?.pickAudio !== 'function') {
+      alert('Audio picker not loaded yet — fully quit and restart the app.')
       return
     }
-    update('background_music_path', p)
+    try {
+      const file = await window.api.dialog.pickAudio()
+      if (file) update('transition_sound_path', file)
+    } catch (err: any) {
+      alert('Could not open the audio picker: ' + (err?.message ?? String(err)))
+    }
   }
 
   async function testTts() {
@@ -184,6 +207,26 @@ export default function SettingsPage(): JSX.Element {
             <span className="code-inline">intro:</span> or <span className="code-inline">outro:</span>).
             Drag &amp; drop a file onto the box above, paste a path, or use Choose. A job can override this
             on the New job tab. Remember to click <strong>Save settings</strong>.
+          </span>
+        </label>
+        <label className="field" style={{ marginTop: 12 }}>
+          Transition whoosh (intro / outro wipes)
+          <div className="path-row" onDragOver={(e) => e.preventDefault()} onDrop={onWhooshDrop}>
+            <input
+              type="text"
+              value={settings.transition_sound_path}
+              onChange={(e) => update('transition_sound_path', e.target.value)}
+              placeholder="Optional — plays with the diagonal wipe between intro/outro and the video"
+            />
+            <button className="secondary" onClick={pickWhoosh}>Choose…</button>
+            {settings.transition_sound_path && (
+              <button className="ghost" onClick={() => update('transition_sound_path', '')}>Clear</button>
+            )}
+          </div>
+          <span className="hint">
+            A short "whoosh" sound effect for the layered wipe transition. Trimmed/faded to the wipe
+            length automatically; the wipe plays silently if this is empty. Remember to click{' '}
+            <strong>Save settings</strong>.
           </span>
         </label>
       </div>

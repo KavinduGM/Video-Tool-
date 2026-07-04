@@ -273,7 +273,7 @@ export async function concatScenesWithTransitions(
   )
 }
 
-function mapTransitionToXfade(t: TransitionType): string | null {
+export function mapTransitionToXfade(t: TransitionType): string | null {
   switch (t) {
     case 'fade':
       return 'fade'
@@ -295,10 +295,95 @@ function mapTransitionToXfade(t: TransitionType): string | null {
       return 'wipeup'
     case 'wipe_down':
       return 'wipedown'
+    case 'diag_wipe':
+      // Diagonal wipe from the bottom-left corner toward the top-right —
+      // used internally for the intro/outro layered wipe transition.
+      return 'diagbl'
     case 'none':
     default:
       return null
   }
+}
+
+// ====================================================================
+// LAYERED DIAGONAL WIPE TRANSITION (intro ↔ scenes ↔ outro)
+// ====================================================================
+// A short clip of three solid color layers sweeping from the bottom-left
+// corner to the top-right, chained with diagonal xfades so the bands
+// visibly trail one another. The runner inserts it between segments and
+// joins it to both neighbors with the same diagonal wipe, producing:
+// outgoing video → layers sweep in over it → layer-on-layer sweeps →
+// last layer wipes away revealing the incoming video. The whoosh sound
+// (if configured) is baked in as the clip's audio track. Entirely
+// deterministic ffmpeg — identical output every time.
+
+export const WIPE_TRANSITION_SECONDS = 0.85
+/** light sky → royal blue → deep navy, matching the reference look */
+const WIPE_COLORS = ['0x6BB6FF', '0x2653F1', '0x0F1D5C'] as const
+
+/** Pure: the video filter graph for the layered wipe. Exported for tests. */
+export function buildWipeFilterGraph(durationSeconds: number): string {
+  const d = durationSeconds
+  const xdur = Math.min(0.3, d * 0.35)
+  const o1 = Math.max(0.05, d * 0.12)
+  const o2 = Math.min(Math.max(o1 + xdur, d * 0.53), d - xdur)
+  return (
+    `[0:v][1:v]xfade=transition=diagbl:duration=${xdur.toFixed(3)}:offset=${o1.toFixed(3)}[vw1];` +
+    `[vw1][2:v]xfade=transition=diagbl:duration=${xdur.toFixed(3)}:offset=${o2.toFixed(3)}[vw]`
+  )
+}
+
+export async function buildWipeTransitionClip(
+  args: {
+    out: string
+    width: number
+    height: number
+    fps?: number
+    durationSeconds?: number
+    /** optional whoosh SFX; silent when absent */
+    whooshPath?: string
+  },
+  onLog?: (l: string) => void
+): Promise<void> {
+  const d = args.durationSeconds ?? WIPE_TRANSITION_SECONDS
+  const fps = args.fps ?? 30
+  const size = `${args.width}x${args.height}`
+  const inputs: string[] = []
+  for (const c of WIPE_COLORS) {
+    inputs.push('-f', 'lavfi', '-i', `color=c=${c}:s=${size}:r=${fps}:d=${d.toFixed(3)}`)
+  }
+  let audioMap: string
+  let filter = buildWipeFilterGraph(d)
+  if (args.whooshPath) {
+    inputs.push('-i', args.whooshPath)
+    // Trim/pad the whoosh to the clip length with a short fade-out so an abrupt
+    // sample end never clicks.
+    filter +=
+      `;[3:a]atrim=0:${d.toFixed(3)},aformat=channel_layouts=stereo:sample_rates=48000,` +
+      `afade=t=out:st=${Math.max(0, d - 0.2).toFixed(3)}:d=0.2,apad=whole_dur=${d.toFixed(3)}[aw]`
+    audioMap = '[aw]'
+  } else {
+    inputs.push('-f', 'lavfi', '-t', d.toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000')
+    audioMap = '3:a'
+  }
+  await runFfmpeg(
+    [
+      '-y',
+      ...inputs,
+      '-filter_complex', filter,
+      '-map', '[vw]',
+      '-map', audioMap,
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'medium',
+      '-crf', '20',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-t', d.toFixed(3),
+      args.out
+    ],
+    onLog
+  )
 }
 
 export function ensureDir(dir: string) {

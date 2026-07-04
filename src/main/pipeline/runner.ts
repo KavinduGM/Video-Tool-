@@ -21,6 +21,8 @@ import {
   muxAudioWithVideo,
   mixVoiceWithMusic,
   burnSubtitles,
+  buildWipeTransitionClip,
+  WIPE_TRANSITION_SECONDS,
   probeDurationSeconds,
   sampleInkFractions,
   ensureDir
@@ -163,6 +165,46 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       transitionOut: res.transitionOut,
       words: res.words
     })
+  }
+
+  // ---- Layered diagonal wipe transitions at the intro/outro joins ----
+  // A deterministic 0.85s clip (three blue layers sweeping bottom-left →
+  // top-right, whoosh SFX baked in) is inserted between intro↔first scene and
+  // last scene↔outro, joined to both neighbors with matching diagonal wipes —
+  // no more hard cuts around the title cards.
+  if ((spec.intro || spec.outro) && results.length >= 2) {
+    const whoosh =
+      settings.transition_sound_path && fs.existsSync(settings.transition_sound_path)
+        ? settings.transition_sound_path
+        : undefined
+    if (settings.transition_sound_path && !whoosh) {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Transition whoosh file not found: ${settings.transition_sound_path} — the wipe will be silent.` })
+    }
+    try {
+      const wipePath = path.join(jobWorkDir, 'transition_wipe.mp4')
+      await buildWipeTransitionClip(
+        { out: wipePath, width: dims.width, height: dims.height, fps: 30, whooshPath: whoosh },
+        (line) => cb.onLog(info(`ffmpeg: ${line}`))
+      )
+      const DIAG: Transition = { type: 'diag_wipe', duration: 0.3 }
+      const wipeEntry = () => ({
+        finalMp4: wipePath,
+        durationSeconds: WIPE_TRANSITION_SECONDS,
+        transitionOut: { ...DIAG },
+        words: null
+      })
+      if (spec.intro) {
+        results[0].transitionOut = { ...DIAG }
+        results.splice(1, 0, wipeEntry())
+      }
+      if (spec.outro) {
+        results[results.length - 2].transitionOut = { ...DIAG }
+        results.splice(results.length - 1, 0, wipeEntry())
+      }
+      cb.onLog(info(`Inserted diagonal wipe transition(s) at the intro/outro join(s) (${WIPE_TRANSITION_SECONDS}s, whoosh: ${whoosh ? 'yes' : 'none'}).`))
+    } catch (err: any) {
+      cb.onLog({ ts: Date.now(), level: 'warn', message: `Could not build the wipe transition (${err.message}) — falling back to plain fades at the joins.` })
+    }
   }
 
   cb.onLog(info(`All ${totalSegments} segment(s) saved. Beginning final concatenation…`))

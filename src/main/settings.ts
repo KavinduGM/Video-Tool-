@@ -10,7 +10,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   elevenlabs_api_key: '',
   default_output_folder: '',
   hyperframes_command: 'npx hyperframes',
-  background_music_path: ''
+  background_music_path: '',
+  transition_sound_path: ''
 }
 
 interface SchemaShape {
@@ -52,7 +53,8 @@ export function getSettings(): AppSettings {
     raw.elevenlabs_api_key === undefined ||
     raw.tts_base_url !== undefined ||
     raw.tts_api_key !== undefined ||
-    raw.background_music_path === undefined
+    raw.background_music_path === undefined ||
+    raw.transition_sound_path === undefined
   if (!needsMigration) return raw
   const migrated: AppSettings = {
     anthropic_api_key: raw.anthropic_api_key ?? '',
@@ -60,7 +62,8 @@ export function getSettings(): AppSettings {
     elevenlabs_api_key: raw.elevenlabs_api_key || raw.tts_api_key || '',
     default_output_folder: raw.default_output_folder ?? '',
     hyperframes_command: raw.hyperframes_command ?? DEFAULT_SETTINGS.hyperframes_command,
-    background_music_path: raw.background_music_path ?? ''
+    background_music_path: raw.background_music_path ?? '',
+    transition_sound_path: raw.transition_sound_path ?? ''
   }
   getStore().set('settings', migrated)
   return migrated
