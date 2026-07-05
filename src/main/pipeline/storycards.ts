@@ -663,12 +663,55 @@ export const STORY_SETS: StorySet[] = [
     spaced: false,
     align: 'center',
     badge: { bg: '#FFFFFF', ink: '#14181F', spaced: true },
-    arrowStyle: 'curved',
-    arrowColor: '#3E2F28',
+    arrowStyle: 'thin',
+    arrowColor: '#3A2B1F',
     pill: 'subscribed',
     assets: { intro1: 'questions', intro2: 'books', outro1: 'clipboard' },
     assetMode: 'image',
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-9 design frames (backdrop-first,
+    // characters baked in). Centered chunky Archivo on light blue; slim white
+    // spaced badge at the safe top (font 58). intro1 is FLIPPED — character
+    // on top, title at the BOTTOM (design abs y≈1312, running into the
+    // caption zone; the safe-zone clamp lifts it to fit fully above).
+    // intro2 abs y≈207 @126/32ch; outro1 abs y≈303 @142/35ch. Outro2: text
+    // abs y≈197 @112/43ch, "Subscribed" pill abs y≈752 (font 76),
+    // hand-drawn dark-brown arrow abs y≈1070 (design 520 → clamp fits 446).
+    layouts: {
+      intro1: {
+        padTop: 0,
+        badgeFontPx: 58,
+        badgeAlign: 'center',
+        txtTop: 1152,
+        fontPx: 138,
+        fontBaseChars: 26,
+        hero: { w: 700, h: 800, x: 'center', top: 200 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 47,
+        fontPx: 126,
+        fontBaseChars: 32,
+        hero: { w: 1000, h: 900, x: 'center', top: 830 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 143,
+        fontPx: 142,
+        fontBaseChars: 35,
+        hero: { w: 700, h: 800, x: 'center', top: 1000 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 37,
+        fontPx: 112,
+        fontBaseChars: 43,
+        pillTop: 592,
+        pillFontPx: 76,
+        arrowTop: 910,
+        arrowH: 520
+      }
+    }
   },
   {
     id: 10,
