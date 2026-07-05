@@ -73,6 +73,10 @@ const api = {
       return () => ipcRenderer.removeListener(IPC.PREVIEW_EVENT, handler)
     }
   },
+  factory: {
+    generate: (args: { channel: string; exam_name: string; doc_path: string; voice_profile: string }): Promise<{ ok: boolean; message: string; queued: number; failed: string[] }> =>
+      ipcRenderer.invoke(IPC.FACTORY_GENERATE, args)
+  },
   template: {
     get: (): Promise<string> => ipcRenderer.invoke(IPC.TEMPLATE_GET)
   },

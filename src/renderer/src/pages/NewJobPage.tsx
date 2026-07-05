@@ -15,9 +15,20 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
   const [music, setMusic] = useState<string | null>(null)
   const [preview, setPreview] = useState<PreviewStatus | null>(lastPreviewStatus)
   const previewBusy = !!preview && !preview.done
+  // Script Factory
+  const CHANNELS = ['OA Practice', 'OA Guides', 'Nursing Exam Support', 'State Exams Prep']
+  const [fChannel, setFChannel] = useState(CHANNELS[0])
+  const [fExam, setFExam] = useState('')
+  const [fDoc, setFDoc] = useState<string | null>(null)
+  const [fVoice, setFVoice] = useState('')
+  const [voices, setVoices] = useState<string[]>([])
 
   useEffect(() => {
     window.api.template.get().then((t) => setTemplate(t))
+    window.api.profiles.list().then((ps) => {
+      setVoices(ps.map((x) => x.name))
+      if (ps.length > 0) setFVoice((v) => v || ps[0].name)
+    })
     const unsub = window.api.preview?.onEvent?.((ev) => {
       lastPreviewStatus = ev
       setPreview(ev)
@@ -94,6 +105,44 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
       lastPreviewStatus = ev
       setPreview(ev)
     }
+  }
+
+  async function runFactory() {
+    setError(null)
+    setOk(null)
+    if (!fExam.trim()) { setError('Enter the exam name (e.g. "WGU C310 OA") — it appears first in every intro.'); return }
+    if (!fDoc) { setError('Pick the exam theory document (.txt or .md, concepts separated by ---).'); return }
+    if (!fVoice) { setError('Pick a voice profile.'); return }
+    if (typeof window.api?.factory?.generate !== 'function') {
+      setError('Factory not loaded yet. Fully quit and restart the app ("npm run dev").')
+      return
+    }
+    const starting: PreviewStatus = { text: 'Factory: starting…', done: false }
+    lastPreviewStatus = starting
+    setPreview(starting)
+    try {
+      const res = await window.api.factory.generate({
+        channel: fChannel,
+        exam_name: fExam.trim(),
+        doc_path: fDoc,
+        voice_profile: fVoice
+      })
+      if (res.queued > 0) onQueued()
+      if (!res.ok && lastPreviewStatus && !lastPreviewStatus.done) {
+        const ev: PreviewStatus = { text: res.message, done: true, ok: false }
+        lastPreviewStatus = ev
+        setPreview(ev)
+      }
+    } catch (err: any) {
+      const ev: PreviewStatus = { text: 'Factory failed: ' + (err?.message ?? String(err)), done: true, ok: false }
+      lastPreviewStatus = ev
+      setPreview(ev)
+    }
+  }
+
+  async function pickFactoryDoc() {
+    const f = await window.api.dialog.pickDocument()
+    if (f) setFDoc(f)
   }
 
   async function enqueueText() {
@@ -279,6 +328,43 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
               Overrides the Settings default; plays under intro/outro at 5%.
             </span>
           )}
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Script Factory</h3>
+        <div className="hint">
+          Upload an exam theory document (.txt/.md, concepts separated by ---) under a channel.
+          The system writes one script per concept with Claude, verifies each against the format
+          guide (deterministic checks + AI review, regenerating on failures), and queues ONLY
+          verified scripts as videos. Music rotates across your saved Music profiles — add new
+          audio names on the Music tab and future runs use them automatically. The exam name you
+          enter appears FIRST in every intro; outros stay universal.
+        </div>
+        <div className="row" style={{ marginTop: 12, gap: 10, flexWrap: 'wrap' }}>
+          <select value={fChannel} onChange={(e) => setFChannel(e.target.value)}>
+            {CHANNELS.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <input
+            style={{ minWidth: 220 }}
+            placeholder='Exam name, e.g. "WGU C310 OA"'
+            value={fExam}
+            onChange={(e) => setFExam(e.target.value)}
+          />
+          <select value={fVoice} onChange={(e) => setFVoice(e.target.value)}>
+            {voices.length === 0 && <option value="">No voice profiles</option>}
+            {voices.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          <button className="ghost" onClick={pickFactoryDoc} disabled={busy || previewBusy}>
+            {fDoc ? '…' + fDoc.slice(-32) : 'Pick theory document'}
+          </button>
+          <button onClick={runFactory} disabled={busy || previewBusy}>
+            {previewBusy ? 'Working…' : 'Generate & queue shorts'}
+          </button>
         </div>
       </div>
 

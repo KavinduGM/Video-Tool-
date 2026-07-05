@@ -181,7 +181,9 @@ export const IPC = {
   TEMPLATES_CLEAR: 'templates:clear',
   // fast intro/outro design preview (no TTS, no AI — story card render only)
   PREVIEW_CARD: 'preview:card',
-  PREVIEW_EVENT: 'preview:event' // main → renderer progress/result stream
+  PREVIEW_EVENT: 'preview:event', // main → renderer progress/result stream
+  // script factory: theory document → verified scripts → queue
+  FACTORY_GENERATE: 'factory:generate'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

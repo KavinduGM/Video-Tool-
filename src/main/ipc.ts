@@ -34,6 +34,14 @@ import { generateAudioWithTimestamps } from './pipeline/tts'
 import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitles, trimPngAlpha } from './pipeline/ffmpeg'
 import { mergeExamTokens, buildAss } from './pipeline/captions'
 import { findProfileByName, findMusicByName } from './settings'
+import {
+  splitConcepts,
+  buildScriptPrompt,
+  generateScript,
+  validateGeneratedScript,
+  reviewScriptWithClaude,
+  factoryVideoName
+} from './pipeline/factory'
 
 // Full-frame design backgrounds (storyboard without texts) — mirror of the
 // runner's BG_SLOTS; a card's *_bg.png wins over its hero slot.
@@ -443,6 +451,152 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         return { ok: true, message, path: finalOut }
       } catch (err: any) {
         return fail(`Preview failed: ${err?.message ?? err}`)
+      }
+    }
+  )
+
+  // ---- SCRIPT FACTORY ----------------------------------------------------
+  // channel + exam name + theory document (.txt/.md, --- separated concepts)
+  // → one verified script per concept → straight into the render queue.
+  // Every script must pass the deterministic format validator AND a Claude
+  // quality review; failures regenerate with exact feedback, and anything
+  // still failing is reported, never queued.
+  ipcMain.handle(
+    IPC.FACTORY_GENERATE,
+    async (
+      _e,
+      args: { channel: string; exam_name: string; doc_path: string; voice_profile: string }
+    ): Promise<{ ok: boolean; message: string; queued: number; failed: string[] }> => {
+      const send = (text: string, extra: { done?: boolean; ok?: boolean } = {}) =>
+        getMainWindow()?.webContents.send(IPC.PREVIEW_EVENT, { text, done: false, ...extra })
+      const finish = (ok: boolean, message: string, queued: number, failed: string[]) => {
+        send(message, { done: true, ok })
+        return { ok, message, queued, failed }
+      }
+      try {
+        const settings = getSettings()
+        if (!settings.anthropic_api_key) return finish(false, 'Anthropic API key is missing in Settings.', 0, [])
+        const examName = args.exam_name.trim()
+        if (!examName) return finish(false, 'Exam name is required (e.g. "WGU C310 OA").', 0, [])
+        if (!findProfileByName(args.voice_profile)) {
+          return finish(false, `Voice profile "${args.voice_profile}" not found.`, 0, [])
+        }
+        if (/\.docx$/i.test(args.doc_path)) {
+          return finish(false, 'Please save the theory document as .txt or .md (docx is not supported yet).', 0, [])
+        }
+        const text = await fs.promises.readFile(args.doc_path, 'utf8')
+        const concepts = splitConcepts(text)
+        if (concepts.length === 0) {
+          return finish(false, 'No concept sections found — separate concepts with lines containing just "---".', 0, [])
+        }
+        const MAX_CONCEPTS = 12
+        const use = concepts.slice(0, MAX_CONCEPTS)
+        if (concepts.length > MAX_CONCEPTS) {
+          send(`Factory: document has ${concepts.length} concepts — generating the first ${MAX_CONCEPTS}.`)
+        }
+
+        // Music rotation from the CURRENT saved profiles — add new audio names
+        // on the Music tab and future runs use them automatically.
+        const music = listMusic().map((m) => m.name)
+        if (music.length === 0) {
+          send('Factory: no music profiles saved — scripts will use the global default music.')
+        }
+
+        const outputFolder = settings.default_output_folder || 'C:\\VideoTool\\out'
+        const queued: string[] = []
+        const failed: string[] = []
+
+        for (let i = 0; i < use.length; i++) {
+          const videoName = factoryVideoName(examName, i)
+          const target = {
+            examName,
+            channel: args.channel,
+            videoName,
+            outputFolder,
+            voiceProfile: args.voice_profile,
+            backgroundMusic: music.length ? music[i % music.length] : undefined,
+            paletteIndex: i,
+            conceptText: use[i]
+          }
+          const expect = {
+            videoName,
+            channel: args.channel,
+            examName,
+            voiceProfile: args.voice_profile,
+            backgroundMusic: target.backgroundMusic
+          }
+          const prompt = buildScriptPrompt(target)
+          let yaml = ''
+          let ok = false
+          let lastErrors: string[] = []
+          // up to 3 attempts against the deterministic validator
+          for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
+            send(`Factory ${i + 1}/${use.length} (${videoName}): writing script (attempt ${attempt})…`)
+            yaml = await generateScript({
+              apiKey: settings.anthropic_api_key,
+              model: settings.claude_model,
+              prompt,
+              feedback: lastErrors.length ? lastErrors.join('\n') : undefined
+            })
+            const v = validateGeneratedScript(yaml, expect)
+            lastErrors = v.errors
+            ok = v.errors.length === 0
+            if (!ok) send(`Factory ${i + 1}/${use.length}: format check found ${v.errors.length} issue(s) — regenerating with exact feedback.`)
+          }
+          if (!ok) {
+            failed.push(`${videoName}: ${lastErrors.slice(0, 3).join(' | ')}`)
+            continue
+          }
+          // Claude quality review — one repair round allowed.
+          send(`Factory ${i + 1}/${use.length}: reviewing script quality…`)
+          let review = await reviewScriptWithClaude({
+            apiKey: settings.anthropic_api_key,
+            model: settings.claude_model,
+            yaml,
+            examName,
+            conceptText: use[i]
+          })
+          if (!review.pass) {
+            send(`Factory ${i + 1}/${use.length}: reviewer flagged ${review.issues.length} issue(s) — one repair round…`)
+            const yaml2 = await generateScript({
+              apiKey: settings.anthropic_api_key,
+              model: settings.claude_model,
+              prompt,
+              feedback: review.issues.join('\n')
+            })
+            const v2 = validateGeneratedScript(yaml2, expect)
+            if (v2.errors.length === 0) {
+              const review2 = await reviewScriptWithClaude({
+                apiKey: settings.anthropic_api_key,
+                model: settings.claude_model,
+                yaml: yaml2,
+                examName,
+                conceptText: use[i]
+              })
+              if (review2.pass) {
+                yaml = yaml2
+                review = review2
+              }
+            }
+          }
+          if (!review.pass) {
+            failed.push(`${videoName}: reviewer — ${review.issues.slice(0, 2).join(' | ')}`)
+            continue
+          }
+          // Verified → queue for rendering.
+          const job = createJob({ video_name: videoName, script_yaml: yaml })
+          broadcast({ type: 'created', job })
+          queued.push(videoName)
+          send(`Factory ${i + 1}/${use.length}: ✓ verified and queued ${videoName}.`)
+        }
+        if (queued.length > 0) worker.wake()
+        const message =
+          `Factory done: ${queued.length}/${use.length} script(s) verified and queued` +
+          (failed.length ? ` — failed: ${failed.join(' ; ')}` : '') +
+          `. Videos are rendering in the Queue.`
+        return finish(queued.length > 0, message, queued.length, failed)
+      } catch (err: any) {
+        return finish(false, `Factory failed: ${err?.message ?? err}`, 0, [])
       }
     }
   )
