@@ -730,7 +730,49 @@ export const STORY_SETS: StorySet[] = [
     pill: 'light',
     assets: { intro1: 'skyscraper', intro2: 'tower', outro1: 'house' },
     assetMode: 'image',
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-10 design frames (backdrop-first,
+    // halftone architecture baked in). Centered rounded Quicksand on
+    // off-white; slim white spaced badge at the safe top (font 58). intro1
+    // title abs y≈444 @145/19ch; intro2 abs y≈273 @160/18ch; outro1 abs
+    // y≈207 @138/25ch. Outro2: text abs y≈212 @138/43ch, white Subscribe
+    // pill abs y≈974 (font 78), solid black block arrow abs y≈1272 (design
+    // 518 — safe-zone clamp renders what fits above the caption zone).
+    layouts: {
+      intro1: {
+        padTop: 0,
+        badgeFontPx: 58,
+        badgeAlign: 'center',
+        txtTop: 284,
+        fontPx: 145,
+        fontBaseChars: 19,
+        hero: { w: 1000, h: 800, x: 'center', top: 940 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 113,
+        fontPx: 160,
+        fontBaseChars: 18,
+        hero: { w: 1040, h: 900, x: 'center', top: 880 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 47,
+        fontPx: 138,
+        fontBaseChars: 25,
+        hero: { w: 950, h: 900, x: 'center', top: 850 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 52,
+        fontPx: 138,
+        fontBaseChars: 43,
+        pillTop: 814,
+        pillFontPx: 78,
+        arrowTop: 1112,
+        arrowH: 518
+      }
+    }
   }
 ]
 
