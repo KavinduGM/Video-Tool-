@@ -65,7 +65,7 @@ const api = {
   },
   shellOpen: (target: string): Promise<void> => ipcRenderer.invoke(IPC.OPEN_PATH, target),
   preview: {
-    card: (script_yaml: string, part: 'intro' | 'outro'): Promise<{ ok: boolean; message: string; path?: string }> =>
+    card: (script_yaml: string, part: 'intro' | 'outro' | 'all'): Promise<{ ok: boolean; message: string; path?: string }> =>
       ipcRenderer.invoke(IPC.PREVIEW_CARD, { script_yaml, part }),
     onEvent: (cb: (e: { text: string; done: boolean; ok?: boolean; path?: string }) => void) => {
       const handler = (_e: unknown, ev: { text: string; done: boolean; ok?: boolean; path?: string }) => cb(ev)

@@ -246,15 +246,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   })
 
   // ---- COMPLETE intro/outro PREVIEW (no middle scenes) -------------------
-  // Produces the REAL segment exactly as a full job would: ElevenLabs
-  // voiceover with word timings, background music at 5%, the story template
-  // card at the true audio duration, held-frame tail, and burned karaoke
-  // captions. Only the middle scenes, transitions and assembly are skipped.
+  // Produces the REAL segment(s) exactly as a full job would: ElevenLabs
+  // voiceover with word timings, music at 10%, the story template card at the
+  // true audio duration, held-frame tail, burned karaoke captions. part:
+  // 'intro' | 'outro' render one card for the picked set; 'all' renders BOTH
+  // cards for EVERY set whose design files are uploaded (voiceovers are
+  // synthesized once and reused across all sets).
   ipcMain.handle(
     IPC.PREVIEW_CARD,
-    async (_e, args: { script_yaml: string; part: 'intro' | 'outro' }): Promise<{ ok: boolean; message: string; path?: string }> => {
-      // Live status stream — the New Job page shows these in a banner that
-      // survives tab switches, so progress and errors are never lost.
+    async (_e, args: { script_yaml: string; part: 'intro' | 'outro' | 'all' }): Promise<{ ok: boolean; message: string; path?: string }> => {
       const send = (text: string, extra: { done?: boolean; ok?: boolean; path?: string } = {}) =>
         getMainWindow()?.webContents.send(IPC.PREVIEW_EVENT, { text, done: false, ...extra })
       const fail = (message: string) => {
@@ -263,13 +263,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       }
       try {
         const settings = getSettings()
-        send(`Preview ${args.part}: reading the script…`)
         const spec = parseScript(args.script_yaml)
-        const io = args.part === 'intro' ? spec.intro : spec.outro
-        if (!io) return fail(`The script has no ${args.part} section.`)
-        if (!io.scene1 || !io.scene2) {
-          return fail(`The ${args.part} has no scene1/scene2 — the story template preview needs both.`)
-        }
+        send(`Preview ${args.part}: reading the script…`)
         const profile = findProfileByName(spec.voice_profile)
         if (!profile) {
           return fail(`Voice profile "${spec.voice_profile}" not found — create it on the Voice Profiles page.`)
@@ -278,123 +273,172 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         const previewDir = path.join(getStoragePaths().workspace, `preview-${randomUUID().slice(0, 8)}`)
         fs.mkdirSync(previewDir, { recursive: true })
 
-        // 1) Real voiceover with word timings (same as a full job).
-        send(`Preview ${args.part}: generating the voiceover with ElevenLabs…`)
-        const audioPath = path.join(previewDir, 'audio.mp3')
-        const tts = await generateAudioWithTimestamps(
-          { apiKey: settings.elevenlabs_api_key },
-          { text: io.voiceover, profile, speedOverride: spec.voice_speed, outPath: audioPath }
-        )
-        const durationSeconds = await probeDurationSeconds(audioPath)
-
-        // 2) Background music at 10% (script name -> global default), best-effort.
-        let audioForMux = audioPath
-        const musicPath = spec.background_music
-          ? findMusicByName(spec.background_music)?.path
-          : settings.background_music_path
-        if (musicPath && fs.existsSync(musicPath)) {
-          try {
-            send(`Preview ${args.part}: mixing background music at 5%…`)
-            const mixed = path.join(previewDir, 'audio-mixed.mp3')
-            await mixVoiceWithMusic({ voiceIn: audioPath, musicIn: musicPath, out: mixed, musicVolume: 0.1, durationSeconds })
-            audioForMux = mixed
-          } catch {
-            /* keep plain voiceover */
-          }
+        type CardPart = 'intro' | 'outro'
+        type PreparedAudio = {
+          io: NonNullable<typeof spec.intro>
+          durationSeconds: number
+          audioForMux: string
+          words: Awaited<ReturnType<typeof generateAudioWithTimestamps>>['words']
         }
 
-        // 3) The story template card — same set picking + PNG slots as the runner.
-        const availableImageSets = STORY_SETS.filter((st) => st.assetMode === 'image')
-          .filter((st) => {
-            const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${st.id}`)
-            const slots = st.imageSlots!
-            const heroes =
-              fs.existsSync(path.join(dir, slots.intro1)) &&
-              fs.existsSync(path.join(dir, slots.intro2)) &&
-              fs.existsSync(path.join(dir, slots.outro1))
-            const bgs =
-              fs.existsSync(path.join(dir, BG_SLOTS.intro1)) &&
-              fs.existsSync(path.join(dir, BG_SLOTS.intro2)) &&
-              fs.existsSync(path.join(dir, BG_SLOTS.outro1))
-            return heroes || bgs
-          })
-          .map((st) => st.id)
-        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
+        // Voiceover + music per part — synthesized ONCE, reused across sets.
+        const prepAudio = async (part: CardPart): Promise<PreparedAudio> => {
+          const io = part === 'intro' ? spec.intro : spec.outro
+          if (!io) throw new Error(`The script has no ${part} section.`)
+          if (!io.scene1 || !io.scene2) throw new Error(`The ${part} has no scene1/scene2 — the story template preview needs both.`)
+          send(`Preview: generating the ${part} voiceover with ElevenLabs…`)
+          const audioPath = path.join(previewDir, `audio-${part}.mp3`)
+          const tts = await generateAudioWithTimestamps(
+            { apiKey: settings.elevenlabs_api_key },
+            { text: io.voiceover, profile, speedOverride: spec.voice_speed, outPath: audioPath }
+          )
+          const durationSeconds = await probeDurationSeconds(audioPath)
+          let audioForMux = audioPath
+          const musicPath = spec.background_music
+            ? findMusicByName(spec.background_music)?.path
+            : settings.background_music_path
+          if (musicPath && fs.existsSync(musicPath)) {
+            try {
+              const mixed = path.join(previewDir, `audio-${part}-mixed.mp3`)
+              await mixVoiceWithMusic({ voiceIn: audioPath, musicIn: musicPath, out: mixed, musicVolume: 0.1, durationSeconds })
+              audioForMux = mixed
+            } catch {
+              /* keep plain voiceover */
+            }
+          }
+          return { io, durationSeconds, audioForMux, words: tts.words }
+        }
 
-        let images: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
-        let backdrops: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
-        const assetCopies: { src: string; name: string; trim: boolean }[] = []
-        if (storySet.assetMode === 'image') {
-          const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+        // Per-set, per-part asset resolution (never throws — reports missing).
+        const resolveAssets = (storySet: (typeof STORY_SETS)[number], part: CardPart) => {
+          const images: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> = {}
+          const backdrops: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> = {}
+          const copies: { src: string; name: string; trim: boolean }[] = []
+          const missing: string[] = []
+          if (storySet.assetMode === 'image') {
+            const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+            const slots = storySet.imageSlots!
+            const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
+              part === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
+            for (const slot of needed) {
+              const bgFull = path.join(assetDir, BG_SLOTS[slot])
+              if (fs.existsSync(bgFull)) {
+                backdrops[slot] = `assets/${BG_SLOTS[slot]}`
+                copies.push({ src: bgFull, name: BG_SLOTS[slot], trim: false })
+                continue
+              }
+              const full = path.join(assetDir, slots[slot])
+              if (fs.existsSync(full)) {
+                images[slot] = `assets/${slots[slot]}`
+                copies.push({ src: full, name: slots[slot], trim: true })
+              } else if (slot !== 'outro2' && !storySet.svgFallbackOk) {
+                missing.push(full)
+              }
+            }
+          }
+          return { images, backdrops, copies, missing }
+        }
+
+        // A set has REAL uploaded designs when its bg triple or hero triple exists.
+        const hasRealUploads = (storySet: (typeof STORY_SETS)[number]): boolean => {
+          const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
           const slots = storySet.imageSlots!
-          const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
-            args.part === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
-          images = {}
-          backdrops = {}
-          for (const slot of needed) {
-            const bgFull = path.join(assetDir, BG_SLOTS[slot])
-            if (fs.existsSync(bgFull)) {
-              backdrops[slot] = `assets/${BG_SLOTS[slot]}`
-              assetCopies.push({ src: bgFull, name: BG_SLOTS[slot], trim: false })
+          const heroes = ['intro1', 'intro2', 'outro1'].every((k) =>
+            fs.existsSync(path.join(dir, slots[k as 'intro1' | 'intro2' | 'outro1']))
+          )
+          const bgs = ['intro1', 'intro2', 'outro1'].every((k) =>
+            fs.existsSync(path.join(dir, BG_SLOTS[k as 'intro1' | 'intro2' | 'outro1']))
+          )
+          return heroes || bgs
+        }
+
+        const renderCard = async (
+          storySet: (typeof STORY_SETS)[number],
+          part: CardPart,
+          a: PreparedAudio,
+          outName: string
+        ): Promise<string> => {
+          const res = resolveAssets(storySet, part)
+          if (res.missing.length > 0) throw new Error(`template image missing: ${res.missing[0]}`)
+          const html = await buildStoryIntroOutroCard({
+            kind: part,
+            scene1: a.io.scene1!,
+            scene2: a.io.scene2!,
+            badge: spec.channel,
+            subscribe: part === 'outro' ? !!a.io.subscribe : false,
+            durationSeconds: a.durationSeconds,
+            set: storySet,
+            images: res.images,
+            backdrops: res.backdrops
+          })
+          const projectDir = path.join(previewDir, `proj-${outName}`)
+          await scaffoldProject(projectDir, html)
+          for (const c of res.copies) {
+            if (c.trim) await trimPngAlpha({ src: c.src, dest: path.join(projectDir, 'assets', c.name) })
+            else await fs.promises.copyFile(c.src, path.join(projectDir, 'assets', c.name))
+          }
+          const raw = path.join(previewDir, `raw-${outName}.mp4`)
+          await renderHyperframes({ command: settings.hyperframes_command, projectDir, outputMp4: raw, onLog: () => {} })
+          const muxed = path.join(previewDir, `mux-${outName}.mp4`)
+          await muxAudioWithVideo({
+            videoIn: raw,
+            audioIn: a.audioForMux,
+            out: muxed,
+            durationSeconds: a.durationSeconds,
+            tailHoldSeconds: part === 'intro' ? 0.35 : 1.0
+          })
+          let finalOut = path.join(previewDir, `${outName}.mp4`)
+          if (spec.captions !== false && a.words && a.words.length > 0) {
+            const assFile = `cap-${outName}.ass`
+            await fs.promises.writeFile(path.join(previewDir, assFile), buildAss([{ units: mergeExamTokens(a.words), offset: 0 }]), 'utf8')
+            try {
+              await burnSubtitles({ videoIn: muxed, assDir: previewDir, assFile, out: finalOut })
+            } catch {
+              finalOut = muxed
+            }
+          } else {
+            finalOut = muxed
+          }
+          return finalOut
+        }
+
+        // ---------------- ALL SETS: batch intro+outro per uploaded set ----------------
+        if (args.part === 'all') {
+          const aIntro = await prepAudio('intro')
+          const aOutro = await prepAudio('outro')
+          const rendered: number[] = []
+          const skipped: string[] = []
+          for (const st of STORY_SETS) {
+            if (!hasRealUploads(st)) {
+              skipped.push(`set ${st.id} (${st.name})`)
               continue
             }
-            const full = path.join(assetDir, slots[slot])
-            if (fs.existsSync(full)) {
-              images[slot] = `assets/${slots[slot]}`
-              assetCopies.push({ src: full, name: slots[slot], trim: true })
-            } else if (slot !== 'outro2' && !storySet.svgFallbackOk) {
-              return fail(`Template image missing: ${full} (or ${BG_SLOTS[slot]}) — add a PNG and preview again.`)
-            }
+            const nn = String(st.id).padStart(2, '0')
+            send(`Preview ALL: set ${st.id} "${st.name}" — rendering intro (${rendered.length * 2 + 1}/${STORY_SETS.length * 2} max)…`)
+            await renderCard(st, 'intro', aIntro, `set-${nn}-intro`)
+            send(`Preview ALL: set ${st.id} "${st.name}" — rendering outro…`)
+            await renderCard(st, 'outro', aOutro, `set-${nn}-outro`)
+            rendered.push(st.id)
           }
+          await shell.openPath(previewDir)
+          const message =
+            `Preview ALL done: rendered intro+outro for ${rendered.length} set(s) [${rendered.join(', ')}]` +
+            (skipped.length ? ` — skipped (no design files uploaded yet): ${skipped.join(', ')}` : '') +
+            `. Files are named set-NN-intro.mp4 / set-NN-outro.mp4.`
+          send(message, { done: true, ok: rendered.length > 0, path: previewDir })
+          return { ok: rendered.length > 0, message, path: previewDir }
         }
 
-        const html = await buildStoryIntroOutroCard({
-          kind: args.part,
-          scene1: io.scene1,
-          scene2: io.scene2,
-          badge: spec.channel,
-          subscribe: args.part === 'outro' ? !!io.subscribe : false,
-          durationSeconds,
-          set: storySet,
-          images,
-          backdrops
-        })
-
-        // 4) Render + mux with the same held-frame tail a full job uses
-        //    (intro feeds the wipe -> short tail; outro ends the video -> 1s).
-        const projectDir = path.join(previewDir, 'project')
-        await scaffoldProject(projectDir, html)
-        for (const a of assetCopies) {
-          // Heroes get their transparent borders trimmed; full-frame backdrops
-          // are used exactly as exported.
-          if (a.trim) await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
-          else await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
-        }
-        const rawMp4 = path.join(previewDir, 'render.mp4')
-        send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${durationSeconds.toFixed(1)}s — takes ~30–60s)…`)
-        await renderHyperframes({ command: settings.hyperframes_command, projectDir, outputMp4: rawMp4, onLog: () => {} })
-        send(`Preview ${args.part}: adding audio + tail…`)
-        const muxed = path.join(previewDir, 'muxed.mp4')
-        const tail = args.part === 'intro' ? 0.35 : 1.0
-        await muxAudioWithVideo({ videoIn: rawMp4, audioIn: audioForMux, out: muxed, durationSeconds, tailHoldSeconds: tail })
-
-        // 5) Karaoke captions, exactly like the final assembly (offset 0).
-        let finalOut = muxed
-        if (spec.captions !== false && tts.words && tts.words.length > 0) {
-          send(`Preview ${args.part}: burning karaoke captions…`)
-          const assFile = 'captions.ass'
-          await fs.promises.writeFile(path.join(previewDir, assFile), buildAss([{ units: mergeExamTokens(tts.words), offset: 0 }]), 'utf8')
-          const captioned = path.join(previewDir, `${args.part}_set${storySet.id}_preview.mp4`)
-          try {
-            await burnSubtitles({ videoIn: muxed, assDir: previewDir, assFile, out: captioned })
-            finalOut = captioned
-          } catch {
-            /* captions best-effort in preview */
-          }
-        }
-
+        // ---------------- SINGLE PART: picked set, as before ----------------
+        const a = await prepAudio(args.part)
+        const availableImageSets = STORY_SETS.filter((st) => st.assetMode === 'image')
+          .filter(hasRealUploads)
+          .map((st) => st.id)
+        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
+        send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${a.durationSeconds.toFixed(1)}s — takes ~30–60s)…`)
+        const finalOut = await renderCard(storySet, args.part, a, `${args.part}_set${storySet.id}_preview`)
         shell.showItemInFolder(finalOut)
-        const message = `Complete ${args.part} preview rendered with set ${storySet.id} "${storySet.name}" (${durationSeconds.toFixed(1)}s + tail, voice + music + captions).`
+        const message = `Complete ${args.part} preview rendered with set ${storySet.id} "${storySet.name}" (${a.durationSeconds.toFixed(1)}s + tail, voice + music + captions).`
         send(message, { done: true, ok: true, path: finalOut })
         return { ok: true, message, path: finalOut }
       } catch (err: any) {

@@ -66,7 +66,7 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
     }
   }
 
-  async function previewCard(part: 'intro' | 'outro') {
+  async function previewCard(part: 'intro' | 'outro' | 'all') {
     setError(null)
     setOk(null)
     if (!yaml.trim()) {
@@ -217,6 +217,9 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
           <button className="secondary" onClick={() => previewCard('outro')} disabled={busy || previewBusy}>
             {previewBusy ? 'Previewing…' : 'Preview outro'}
           </button>
+          <button className="secondary" onClick={() => previewCard('all')} disabled={busy || previewBusy}>
+            {previewBusy ? 'Previewing…' : 'Preview ALL sets'}
+          </button>
         </div>
         {preview && (
           <div
@@ -244,8 +247,9 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
         )}
         <div className="hint" style={{ marginTop: 6 }}>
           Preview renders the COMPLETE intro/outro segment — real voiceover, background music,
-          template card and karaoke captions — skipping only the middle scenes. Costs a little
-          ElevenLabs credit, no Claude credits. The mp4 opens when done (~1 min).
+          template card and karaoke captions — skipping only the middle scenes. No Claude credits.
+          "Preview ALL sets" renders intro+outro for EVERY set with uploaded design files into one
+          folder (2 voiceover calls total, ~1 min per card) — sets without files are skipped.
         </div>
         <div
           onDragOver={(e) => e.preventDefault()}
