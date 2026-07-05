@@ -602,7 +602,54 @@ export const STORY_SETS: StorySet[] = [
     pill: 'dark',
     assets: { intro1: 'books', intro2: 'questions', outro1: 'clipboard' },
     assetMode: 'image',
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-8 design frames (backdrop-first,
+    // character illustrations baked in). Archivo caps on warm paper. Slim
+    // white spaced badge at the safe top (font 58, centered). intro1 title
+    // LEFT abs y≈353 @116/24ch (padLeft 25); intro2 RIGHT-aligned abs y≈227
+    // @150/23ch; outro1 centered abs y≈177 @140/31ch. Outro2 centered: text
+    // at the safe top @130/43ch, dark SUBSCRIBE pill abs y≈1095 (font 64),
+    // RED curved arrow at abs y≈1358 in the design — the safe-zone clamp
+    // lifts it to fit fully above the caption zone.
+    layouts: {
+      intro1: {
+        padTop: 0,
+        badgeFontPx: 58,
+        badgeAlign: 'center',
+        txtTop: 193,
+        padLeft: 25,
+        fontPx: 116,
+        fontBaseChars: 24,
+        hero: { w: 1000, h: 950, x: 'center', top: 800 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 67,
+        textAlign: 'right',
+        fontPx: 150,
+        fontBaseChars: 23,
+        hero: { w: 900, h: 850, x: 'center', top: 890 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 17,
+        textAlign: 'center',
+        fontPx: 140,
+        fontBaseChars: 31,
+        hero: { w: 980, h: 850, x: 'center', top: 880 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 0,
+        textAlign: 'center',
+        fontPx: 130,
+        fontBaseChars: 43,
+        pillTop: 935,
+        pillFontPx: 64,
+        arrowTop: 1198,
+        arrowH: 455
+      }
+    }
   },
   {
     id: 9,
