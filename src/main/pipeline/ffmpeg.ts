@@ -344,15 +344,16 @@ export interface TransitionStyle {
   colors: string[]
 }
 
-// Brand palette rule: transition layers use ONLY blue grades (sky, royal,
-// navy) and yellow grades — no other hues. Video is encoded limited-range
-// (luma gaps shrink ×0.86), so at least one layer pair per style keeps a
-// FULL-RANGE luma gap >65 — proven to register in the deterministic clip
-// review on real renders.
+// Brand palette rule: each transition uses ONE color family only — blue
+// styles use blue grades (sky/royal/navy), yellow styles use yellow grades
+// (pale/golden/deep gold). NEVER mixed within a transition. Video is
+// encoded limited-range (luma gaps shrink ×0.86), so at least one layer
+// pair per style keeps a FULL-RANGE luma gap >65 — proven to register in
+// the deterministic clip review on real renders.
 export const TRANSITION_STYLES: TransitionStyle[] = [
   { name: 'diag-blue', join: 'diag_wipe', xfade: 'diagbl', colors: ['0x6BB6FF', '0x2653F1', '0x0F1D5C'] },
-  { name: 'diag-gold', join: 'diag_wipe', xfade: 'diagbl', colors: ['0xFFD84D', '0x2653F1', '0x0F1D5C'] },
-  { name: 'circle-sun', join: 'circle_open', xfade: 'circleopen', colors: ['0xE8D44D', '0x1F5FD6'] },
+  { name: 'diag-gold', join: 'diag_wipe', xfade: 'diagbl', colors: ['0xFFF7C2', '0xE8A800', '0x705200'] },
+  { name: 'circle-sun', join: 'circle_open', xfade: 'circleopen', colors: ['0xFFE9A0', '0xD69E00'] },
   { name: 'circle-sky', join: 'circle_open', xfade: 'circleopen', colors: ['0x8FC7FF', '0x14275E'] }
 ]
 
