@@ -575,26 +575,31 @@ function assetSvg(id: AssetId, px: number): string {
  * curving, pointing, stop". After the draw, the idle bob keeps it alive
  * until the voice ends. Delays are absolute (seconds into the card).
  */
+/**
+ * Every arrow is ONE single shape — the head is part of the same path (or
+ * one filled polygon), so it can NEVER render detached or misaligned. The
+ * stroke arrows still draw themselves (the dash animation runs through the
+ * curve first, then the head barbs, in one continuous reveal); the block
+ * arrow pops in whole.
+ */
 function arrowSvgStyled(style: ArrowStyle, color: string, heightPx: number, drawDelay = 0): string {
   const H = Math.round(heightPx)
   const d1 = drawDelay.toFixed(2)
-  const d2 = (drawDelay + 0.7).toFixed(2)
   switch (style) {
     case 'block':
+      // One solid filled arrow (shaft + head in a single polygon).
       return `<svg viewBox="0 0 120 260" height="${Math.round(H * 0.52)}" aria-hidden="true">
-  <path class="adraw" style="animation-delay:${d1}s" d="M60 8 L60 182" stroke="${color}" stroke-width="26" stroke-linecap="round" fill="none"/>
-  <polygon class="ahead" style="animation-delay:${d2}s" points="18,174 102,174 60,248" fill="${color}"/>
+  <polygon class="ahead" style="animation-delay:${d1}s" points="47,8 73,8 73,174 102,174 60,248 18,174 47,174" fill="${color}"/>
 </svg>`
     case 'thin':
       return `<svg viewBox="0 0 100 340" height="${Math.round(H * 0.75)}" aria-hidden="true">
-  <path class="adraw" style="animation-delay:${d1}s" d="M50 6 L50 306" stroke="${color}" stroke-width="11" stroke-linecap="round" fill="none"/>
-  <path class="ahead" style="animation-delay:${d2}s" d="M14 262 L50 330 L86 262" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path class="adraw" style="animation-delay:${d1}s" d="M50 6 L50 322 M16 266 L50 330 L84 266" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>`
     case 'curved':
-      // Long sweeping curve (~1.55× the original) per the storyboard scale.
+      // Long sweeping curve; head barbs computed from the curve-end tangent
+      // (tip 46,232) so the point always caps the stroke exactly.
       return `<svg viewBox="0 0 170 320" height="${H}" aria-hidden="true">
-  <path class="adraw" style="animation-delay:${d1}s" d="M126 12 q34 80 -8 158 q-26 48 -72 62" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round"/>
-  <path class="ahead" style="animation-delay:${d2}s" d="M84 200 L42 238 L90 256" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="adraw" style="animation-delay:${d1}s" d="M126 12 q34 80 -8 158 q-26 48 -72 62 M74 196 L46 232 L90 246" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`
   }
 }
@@ -858,7 +863,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   .sub-outline .sub-label{color:${set.ink}}
   .sub-label{font-weight:800;font-size:38px;letter-spacing:1px;font-style:normal}
   .arrow-pop{align-self:center;margin-top:30px;opacity:0;animation:wIn .5s ease-out both;animation-iteration-count:1}
-  .adraw{stroke-dasharray:420;stroke-dashoffset:420;animation:adraw .8s ease-in-out both;animation-iteration-count:1}
+  .adraw{stroke-dasharray:520;stroke-dashoffset:520;animation:adraw .8s ease-in-out both;animation-iteration-count:1}
   .ahead{opacity:0;animation:ahead .22s ease-out both;animation-iteration-count:1}
   .bob{animation:bob 1.6s ease-in-out infinite}
   @keyframes wIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
