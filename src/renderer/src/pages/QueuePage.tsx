@@ -3,6 +3,7 @@ import type { Job } from '../../../shared/types'
 
 export default function QueuePage({ jobs }: { jobs: Job[] }): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<string | null>(null)
   const selectedJob = jobs.find((j) => j.id === selected) ?? null
   const clearableCount = jobs.filter((j) => j.status !== 'running').length
 
@@ -66,6 +67,11 @@ export default function QueuePage({ jobs }: { jobs: Job[] }): JSX.Element {
                 Retry
               </button>
             )}
+            {j.status === 'review' && (
+              <button onClick={() => setReviewing(j.id)}>
+                Review &amp; approve
+              </button>
+            )}
             {j.status === 'completed' && j.output_path && (
               <button className="secondary" onClick={() => window.api.shellOpen(j.output_path!)}>
                 Show file
@@ -83,7 +89,61 @@ export default function QueuePage({ jobs }: { jobs: Job[] }): JSX.Element {
       {selectedJob && (
         <JobDetails job={selectedJob} onClose={() => setSelected(null)} />
       )}
+      {reviewing && jobs.find((j) => j.id === reviewing) && (
+        <ReviewModal
+          job={jobs.find((j) => j.id === reviewing)!}
+          onClose={() => setReviewing(null)}
+        />
+      )}
     </>
+  )
+}
+
+/**
+ * Manual review for a factory script the automated gates doubted: shows WHY
+ * it was flagged, lets the user edit the YAML, and approves it into the
+ * render queue (re-validated on approve — an invalid edit is rejected with
+ * the exact parser error).
+ */
+function ReviewModal({ job, onClose }: { job: Job; onClose: () => void }): JSX.Element {
+  const [text, setText] = useState(job.script_yaml)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function approve() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const res = await window.api.jobs.approve(job.id, text)
+      if (res.ok) onClose()
+      else setErr(res.reason ?? 'Could not approve.')
+    } catch (e: any) {
+      setErr(e?.message ?? String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Manual review — {job.video_name}</h3>
+        <div className="banner err" style={{ marginBottom: 10 }}>
+          {job.error ?? 'The automated review had doubts about this script.'}
+        </div>
+        {err && <div className="banner err" style={{ marginBottom: 10 }}>{err}</div>}
+        <textarea
+          spellCheck={false}
+          style={{ width: '100%', minHeight: 340, fontFamily: 'monospace', fontSize: 12 }}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="row" style={{ marginTop: 12 }}>
+          <button onClick={approve} disabled={busy}>
+            {busy ? 'Approving…' : 'Approve & queue'}
+          </button>
+          <button className="ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

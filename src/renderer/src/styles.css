@@ -177,6 +177,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .tag.completed { background: #16332a; color: var(--good); }
 .tag.failed { background: #3a1f29; color: var(--danger); }
 .tag.cancelled { background: #2a2a35; color: var(--text-dim); }
+.tag.review { background: #3a3220; color: #ffd166; }
 
 .job {
   display: grid;

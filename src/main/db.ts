@@ -89,6 +89,8 @@ export function createJob(input: {
   script_yaml: string
   script_path?: string
   music_path?: string
+  status?: 'queued' | 'review'
+  error?: string
 }): Job {
   const db = init()
   const now = Date.now()
@@ -96,7 +98,8 @@ export function createJob(input: {
     id: randomUUID(),
     created_at: now,
     updated_at: now,
-    status: 'queued',
+    status: input.status ?? 'queued',
+    error: input.error,
     script_yaml: input.script_yaml,
     script_path: input.script_path,
     video_name: input.video_name,
@@ -169,7 +172,8 @@ export function deleteJob(id: string): void {
 
 export function resetJob(id: string): Job | null {
   return updateJob(id, {
-    status: 'queued',
+    status: input.status ?? 'queued',
+    error: input.error,
     progress: 0,
     current_step: undefined,
     error: undefined,

@@ -103,6 +103,7 @@ export type JobStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'review' // generated script needs the user's manual review before rendering
 
 export interface JobLogEntry {
   ts: number
@@ -183,7 +184,8 @@ export const IPC = {
   PREVIEW_CARD: 'preview:card',
   PREVIEW_EVENT: 'preview:event', // main → renderer progress/result stream
   // script factory: theory document → verified scripts → queue
-  FACTORY_GENERATE: 'factory:generate'
+  FACTORY_GENERATE: 'factory:generate',
+  JOB_APPROVE: 'job:approve' // approve (optionally with edits) a needs-review script
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

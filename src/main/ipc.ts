@@ -197,6 +197,37 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     return job
   })
 
+  // Approve a needs-review script (optionally with the user's edits) → queue.
+  ipcMain.handle(
+    IPC.JOB_APPROVE,
+    (_e, args: { id: string; script_yaml?: string }): { ok: boolean; reason?: string } => {
+      const job = getJob(args.id)
+      if (!job) return { ok: false, reason: 'Job not found.' }
+      if (job.status !== 'review') return { ok: false, reason: `Job is ${job.status}, not awaiting review.` }
+      let yaml = args.script_yaml ?? job.script_yaml
+      let videoName = job.video_name
+      try {
+        const spec = parseScript(yaml)
+        videoName = spec.video_name
+      } catch (err: any) {
+        return { ok: false, reason: `Script still doesn't validate: ${err?.message ?? err}` }
+      }
+      const updated = updateJob(args.id, {
+        script_yaml: yaml,
+        video_name: videoName,
+        status: 'queued',
+        error: undefined,
+        current_step: undefined,
+        progress: 0
+      })
+      if (updated) {
+        broadcast({ type: 'updated', job: updated })
+        worker.wake()
+      }
+      return { ok: true }
+    }
+  )
+
   ipcMain.handle(IPC.PICK_FOLDER, async (_e, defaultPath?: string) => {
     const win = getMainWindow()
     const res = await dialog.showOpenDialog(win!, {
@@ -529,6 +560,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           let yaml = ''
           let ok = false
           let lastErrors: string[] = []
+          try {
           // up to 3 attempts against the deterministic validator
           for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
             send(`Factory ${i + 1}/${use.length} (${videoName}): writing script (attempt ${attempt})…`)
@@ -544,7 +576,14 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
             if (!ok) send(`Factory ${i + 1}/${use.length}: format check found ${v.errors.length} issue(s) — regenerating with exact feedback.`)
           }
           if (!ok) {
-            failed.push(`${videoName}: ${lastErrors.slice(0, 3).join(' | ')}`)
+            // Park it for MANUAL review instead of discarding — the user can
+            // fix/approve it from the Queue tab.
+            const reason = `Format check: ${lastErrors.slice(0, 4).join(' | ')}`
+            const rj = createJob({ video_name: videoName, script_yaml: yaml, status: 'review', error: reason })
+            updateJob(rj.id, { current_step: 'Needs manual review' })
+            broadcast({ type: 'created', job: getJob(rj.id)! })
+            failed.push(videoName)
+            send(`Factory ${i + 1}/${use.length}: ${videoName} needs YOUR review (Queue tab) — ${lastErrors.length} unresolved issue(s).`)
             continue
           }
           // Claude quality review — one repair round allowed.
@@ -580,7 +619,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
             }
           }
           if (!review.pass) {
-            failed.push(`${videoName}: reviewer — ${review.issues.slice(0, 2).join(' | ')}`)
+            const reason = `AI reviewer: ${review.issues.slice(0, 3).join(' | ')}`
+            const rj = createJob({ video_name: videoName, script_yaml: yaml, status: 'review', error: reason })
+            updateJob(rj.id, { current_step: 'Needs manual review' })
+            broadcast({ type: 'created', job: getJob(rj.id)! })
+            failed.push(videoName)
+            send(`Factory ${i + 1}/${use.length}: ${videoName} needs YOUR review (Queue tab) — reviewer doubts: ${review.issues[0] ?? ''}`)
             continue
           }
           // Verified → queue for rendering.
@@ -588,13 +632,22 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           broadcast({ type: 'created', job })
           queued.push(videoName)
           send(`Factory ${i + 1}/${use.length}: ✓ verified and queued ${videoName}.`)
+          } catch (err: any) {
+            failed.push(videoName)
+            if (yaml) {
+              const rj = createJob({ video_name: videoName, script_yaml: yaml, status: 'review', error: `Generation error: ${err?.message ?? err}` })
+              updateJob(rj.id, { current_step: 'Needs manual review' })
+              broadcast({ type: 'created', job: getJob(rj.id)! })
+            }
+            send(`Factory ${i + 1}/${use.length}: ${videoName} hit an error (${err?.message ?? err}) — continuing with the next concept.`)
+          }
         }
         if (queued.length > 0) worker.wake()
         const message =
-          `Factory done: ${queued.length}/${use.length} script(s) verified and queued` +
-          (failed.length ? ` — failed: ${failed.join(' ; ')}` : '') +
-          `. Videos are rendering in the Queue.`
-        return finish(queued.length > 0, message, queued.length, failed)
+          `Factory done: ${queued.length}/${use.length} verified and rendering` +
+          (failed.length ? ` — ${failed.length} NEED YOUR MANUAL REVIEW in the Queue tab: ${failed.join(', ')}` : '') +
+          `.`
+        return finish(queued.length > 0 || failed.length > 0, message, queued.length, failed)
       } catch (err: any) {
         return finish(false, `Factory failed: ${err?.message ?? err}`, 0, [])
       }

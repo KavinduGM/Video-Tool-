@@ -41,6 +41,8 @@ const api = {
     clearHistory: (): Promise<{ ok: boolean; removed: number; keptRunning: number }> =>
       ipcRenderer.invoke(IPC.JOB_CLEAR),
     retry: (id: string): Promise<Job | null> => ipcRenderer.invoke(IPC.JOB_RETRY, id),
+    approve: (id: string, script_yaml?: string): Promise<{ ok: boolean; reason?: string }> =>
+      ipcRenderer.invoke(IPC.JOB_APPROVE, { id, script_yaml }),
     onEvent: (cb: (event: QueueEvent) => void) => {
       const handler = (_e: unknown, event: QueueEvent) => cb(event)
       ipcRenderer.on(IPC.JOB_EVENT, handler)
