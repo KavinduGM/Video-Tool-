@@ -642,7 +642,7 @@ export const STORY_SETS: StorySet[] = [
         padTop: 0,
         txtTop: 0,
         textAlign: 'center',
-        fontPx: 130,
+        fontPx: 120, // was 130 — design-length text grazed the right border
         fontBaseChars: 43,
         pillTop: 935,
         pillFontPx: 64,
