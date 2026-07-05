@@ -540,7 +540,50 @@ export const STORY_SETS: StorySet[] = [
     pill: 'outline',
     assets: { intro1: 'books', intro2: 'questions', outro1: 'clipboard' },
     assetMode: 'image',
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-7 design frames (backdrop-first,
+    // character illustrations baked into the frames). Centered Poppins on
+    // lavender; slim white spaced badge at the safe top (font 58). intro1
+    // title abs y≈454 @130/19ch; intro2 abs y≈197 @135/36ch; outro1 abs
+    // y≈227 @132/30ch (the design's mid-word wrap is NOT reproduced — we
+    // wrap at word boundaries only). Outro2: text abs y≈288 @116/43ch,
+    // outlined SUBSCRIBE pill abs y≈898 (font 66), thin arrow abs y≈1302
+    // (design 490 — safe-zone clamp renders what fits).
+    layouts: {
+      intro1: {
+        padTop: 0,
+        badgeFontPx: 58,
+        badgeAlign: 'center',
+        txtTop: 294,
+        fontPx: 130,
+        fontBaseChars: 19,
+        hero: { w: 900, h: 900, x: 'center', top: 860 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 37,
+        fontPx: 135,
+        fontBaseChars: 36,
+        hero: { w: 980, h: 830, x: 'center', top: 880 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 67,
+        fontPx: 132,
+        fontBaseChars: 30,
+        hero: { w: 850, h: 880, x: 'center', top: 850 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 128,
+        fontPx: 116,
+        fontBaseChars: 43,
+        pillTop: 738,
+        pillFontPx: 66,
+        arrowTop: 1142,
+        arrowH: 490
+      }
+    }
   },
   {
     id: 8,
