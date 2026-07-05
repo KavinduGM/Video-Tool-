@@ -180,7 +180,8 @@ export const IPC = {
   TEMPLATES_COUNT: 'templates:count',
   TEMPLATES_CLEAR: 'templates:clear',
   // fast intro/outro design preview (no TTS, no AI — story card render only)
-  PREVIEW_CARD: 'preview:card'
+  PREVIEW_CARD: 'preview:card',
+  PREVIEW_EVENT: 'preview:event' // main → renderer progress/result stream
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
 
+type PreviewStatus = { text: string; done: boolean; ok?: boolean; path?: string }
+// Module-level so the status survives switching tabs (the page unmounts, the
+// preview keeps running in the main process, and the latest event is restored
+// on remount).
+let lastPreviewStatus: PreviewStatus | null = null
+
 export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.Element {
   const [yaml, setYaml] = useState('')
   const [template, setTemplate] = useState('')
@@ -7,9 +13,18 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
   const [music, setMusic] = useState<string | null>(null)
+  const [preview, setPreview] = useState<PreviewStatus | null>(lastPreviewStatus)
+  const previewBusy = !!preview && !preview.done
 
   useEffect(() => {
     window.api.template.get().then((t) => setTemplate(t))
+    const unsub = window.api.preview?.onEvent?.((ev) => {
+      lastPreviewStatus = ev
+      setPreview(ev)
+    })
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
   }, [])
 
   const musicArg = () => music ?? undefined
@@ -62,15 +77,22 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
       setError('Preview not loaded yet. Fully quit and restart the app ("npm run dev") — preview lives in the preload script, which only updates on a full restart.')
       return
     }
-    setBusy(true)
+    const starting: PreviewStatus = { text: `Preview ${part}: starting…`, done: false }
+    lastPreviewStatus = starting
+    setPreview(starting)
     try {
+      // Progress + result arrive via the event stream (the banner below);
+      // the invoke result is only a fallback if events were missed.
       const res = await window.api.preview.card(yaml, part)
-      if (res.ok) setOk(res.message)
-      else setError(res.message)
+      if (!res.ok && lastPreviewStatus && !lastPreviewStatus.done) {
+        const ev: PreviewStatus = { text: res.message, done: true, ok: false }
+        lastPreviewStatus = ev
+        setPreview(ev)
+      }
     } catch (err: any) {
-      setError('Preview failed: ' + (err?.message ?? String(err)))
-    } finally {
-      setBusy(false)
+      const ev: PreviewStatus = { text: 'Preview failed: ' + (err?.message ?? String(err)), done: true, ok: false }
+      lastPreviewStatus = ev
+      setPreview(ev)
     }
   }
 
@@ -189,13 +211,37 @@ export default function NewJobPage({ onQueued }: { onQueued: () => void }): JSX.
           >
             Load template
           </button>
-          <button className="secondary" onClick={() => previewCard('intro')} disabled={busy}>
-            {busy ? 'Working…' : 'Preview intro'}
+          <button className="secondary" onClick={() => previewCard('intro')} disabled={busy || previewBusy}>
+            {previewBusy ? 'Previewing…' : 'Preview intro'}
           </button>
-          <button className="secondary" onClick={() => previewCard('outro')} disabled={busy}>
-            {busy ? 'Working…' : 'Preview outro'}
+          <button className="secondary" onClick={() => previewCard('outro')} disabled={busy || previewBusy}>
+            {previewBusy ? 'Previewing…' : 'Preview outro'}
           </button>
         </div>
+        {preview && (
+          <div
+            className={`banner ${preview.done ? (preview.ok ? 'ok' : 'err') : ''}`}
+            style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}
+          >
+            <span style={{ flex: 1 }}>{preview.done ? '' : '⏳ '}{preview.text}</span>
+            {preview.done && preview.ok && preview.path && (
+              <button className="ghost" onClick={() => window.api.shellOpen(preview.path!)}>
+                Open video
+              </button>
+            )}
+            {preview.done && (
+              <button
+                className="ghost"
+                onClick={() => {
+                  lastPreviewStatus = null
+                  setPreview(null)
+                }}
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        )}
         <div className="hint" style={{ marginTop: 6 }}>
           Preview renders the COMPLETE intro/outro segment — real voiceover, background music,
           template card and karaoke captions — skipping only the middle scenes. Costs a little

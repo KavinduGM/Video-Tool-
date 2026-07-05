@@ -244,23 +244,33 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(
     IPC.PREVIEW_CARD,
     async (_e, args: { script_yaml: string; part: 'intro' | 'outro' }): Promise<{ ok: boolean; message: string; path?: string }> => {
+      // Live status stream — the New Job page shows these in a banner that
+      // survives tab switches, so progress and errors are never lost.
+      const send = (text: string, extra: { done?: boolean; ok?: boolean; path?: string } = {}) =>
+        getMainWindow()?.webContents.send(IPC.PREVIEW_EVENT, { text, done: false, ...extra })
+      const fail = (message: string) => {
+        send(message, { done: true, ok: false })
+        return { ok: false, message }
+      }
       try {
         const settings = getSettings()
+        send(`Preview ${args.part}: reading the script…`)
         const spec = parseScript(args.script_yaml)
         const io = args.part === 'intro' ? spec.intro : spec.outro
-        if (!io) return { ok: false, message: `The script has no ${args.part} section.` }
+        if (!io) return fail(`The script has no ${args.part} section.`)
         if (!io.scene1 || !io.scene2) {
-          return { ok: false, message: `The ${args.part} has no scene1/scene2 — the story template preview needs both.` }
+          return fail(`The ${args.part} has no scene1/scene2 — the story template preview needs both.`)
         }
         const profile = findProfileByName(spec.voice_profile)
         if (!profile) {
-          return { ok: false, message: `Voice profile "${spec.voice_profile}" not found — create it on the Voice Profiles page.` }
+          return fail(`Voice profile "${spec.voice_profile}" not found — create it on the Voice Profiles page.`)
         }
 
         const previewDir = path.join(getStoragePaths().workspace, `preview-${randomUUID().slice(0, 8)}`)
         fs.mkdirSync(previewDir, { recursive: true })
 
         // 1) Real voiceover with word timings (same as a full job).
+        send(`Preview ${args.part}: generating the voiceover with ElevenLabs…`)
         const audioPath = path.join(previewDir, 'audio.mp3')
         const tts = await generateAudioWithTimestamps(
           { apiKey: settings.elevenlabs_api_key },
@@ -275,6 +285,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           : settings.background_music_path
         if (musicPath && fs.existsSync(musicPath)) {
           try {
+            send(`Preview ${args.part}: mixing background music at 5%…`)
             const mixed = path.join(previewDir, 'audio-mixed.mp3')
             await mixVoiceWithMusic({ voiceIn: audioPath, musicIn: musicPath, out: mixed, musicVolume: 0.05, durationSeconds })
             audioForMux = mixed
@@ -311,7 +322,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
               images[slot] = `assets/${slots[slot]}`
               assetCopies.push({ src: full, name: slots[slot] })
             } else if (slot !== 'outro2' && !storySet.svgFallbackOk) {
-              return { ok: false, message: `Template image missing: ${full} — add the PNG and preview again.` }
+              return fail(`Template image missing: ${full} — add the PNG and preview again.`)
             }
           }
         }
@@ -335,7 +346,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
         }
         const rawMp4 = path.join(previewDir, 'render.mp4')
+        send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${durationSeconds.toFixed(1)}s — takes ~30–60s)…`)
         await renderHyperframes({ command: settings.hyperframes_command, projectDir, outputMp4: rawMp4, onLog: () => {} })
+        send(`Preview ${args.part}: adding audio + tail…`)
         const muxed = path.join(previewDir, 'muxed.mp4')
         const tail = args.part === 'intro' ? 0.35 : 1.0
         await muxAudioWithVideo({ videoIn: rawMp4, audioIn: audioForMux, out: muxed, durationSeconds, tailHoldSeconds: tail })
@@ -343,6 +356,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         // 5) Karaoke captions, exactly like the final assembly (offset 0).
         let finalOut = muxed
         if (spec.captions !== false && tts.words && tts.words.length > 0) {
+          send(`Preview ${args.part}: burning karaoke captions…`)
           const assFile = 'captions.ass'
           await fs.promises.writeFile(path.join(previewDir, assFile), buildAss([{ units: mergeExamTokens(tts.words), offset: 0 }]), 'utf8')
           const captioned = path.join(previewDir, `${args.part}_set${storySet.id}_preview.mp4`)
@@ -355,13 +369,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         }
 
         shell.showItemInFolder(finalOut)
-        return {
-          ok: true,
-          message: `Complete ${args.part} preview rendered with set ${storySet.id} "${storySet.name}" (${durationSeconds.toFixed(1)}s + tail, voice + music + captions).`,
-          path: finalOut
-        }
+        const message = `Complete ${args.part} preview rendered with set ${storySet.id} "${storySet.name}" (${durationSeconds.toFixed(1)}s + tail, voice + music + captions).`
+        send(message, { done: true, ok: true, path: finalOut })
+        return { ok: true, message, path: finalOut }
       } catch (err: any) {
-        return { ok: false, message: `Preview failed: ${err?.message ?? err}` }
+        return fail(`Preview failed: ${err?.message ?? err}`)
       }
     }
   )
