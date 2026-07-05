@@ -347,7 +347,49 @@ export const STORY_SETS: StorySet[] = [
     assets: { intro1: 'house', intro2: 'branch', outro1: 'roof' },
     assetMode: 'image',
     svgFallbackOk: true,
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-4 design frames (backdrop-first).
+    // Chunky Baloo caps, centered. Yellow badge centered at abs y≈167
+    // (font 96); intro1 title abs y≈399 @140/23ch; intro2 abs y≈167
+    // @138/29ch; outro1 abs y≈177 @138/27ch. Outro2 is pill-FIRST:
+    // "Subscribed" pill abs y≈197 (font 88), text abs y≈515 @132/43ch,
+    // big gray curved arrow abs y≈1242 (design height 640 — the safe-zone
+    // clamp renders what fits above the caption zone).
+    layouts: {
+      intro1: {
+        padTop: 7,
+        badgeFontPx: 96,
+        badgeAlign: 'center',
+        txtTop: 239,
+        fontPx: 140,
+        fontBaseChars: 23,
+        hero: { w: 900, h: 900, x: 'center', top: 840 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 7,
+        fontPx: 138,
+        fontBaseChars: 29,
+        hero: { w: 620, h: 900, x: 'center', top: 770 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 17,
+        fontPx: 138,
+        fontBaseChars: 27,
+        hero: { w: 900, h: 640, x: 'center', top: 1090 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 355,
+        fontPx: 132,
+        fontBaseChars: 43,
+        pillTop: 37,
+        pillFontPx: 88,
+        arrowTop: 1082,
+        arrowH: 640
+      }
+    }
   },
   {
     id: 5,
