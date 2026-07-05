@@ -813,8 +813,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
   .bgwrap{position:absolute;inset:0;overflow:hidden}
-  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 4.7s ease-in-out infinite}
-  .drift2{animation:drift2 5.6s ease-in-out infinite}
+  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 1.1s ease-in-out infinite}
+  .drift2{animation:drift2 1.3s ease-in-out infinite}
   .bgsc1{animation:bgOut .35s ease-in both;animation-iteration-count:1}
   .bgsc2{opacity:0;animation:bgIn .35s ease-out both;animation-iteration-count:1}
   .heroA{position:absolute;left:50%;transform:translateX(-50%)}
@@ -844,20 +844,30 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
   @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
-  /* Handheld micro-drift: tiny irregular x/y movements with a breathing hint
-     of motion blur — no zoom. scale(1.02) overscans 21px so the ±6px travel
-     never exposes the frame edges. Different phase per scene. */
+  /* Camera-jitter: VISIBLE rapid x/y trembling at small amplitude (±7px,
+     ~1.1s/1.3s per cycle through 8 waypoints ≈ 60-90px/s of on-screen
+     velocity — clearly alive, never a large move). A light pulsing blur
+     sells the motion. scale(1.03) overscans ~32px so the travel never
+     exposes frame edges. Different waypoints + period per scene. */
   @keyframes drift1{
-    0%,100%{transform:scale(1.02) translate(0,0);filter:blur(0)}
-    22%{transform:scale(1.02) translate(-6px,4px);filter:blur(0.6px)}
-    48%{transform:scale(1.02) translate(5px,-5px);filter:blur(0.35px)}
-    74%{transform:scale(1.02) translate(-3px,-6px);filter:blur(0.6px)}
+    0%,100%{transform:scale(1.03) translate(0,0);filter:blur(0.25px)}
+    12%{transform:scale(1.03) translate(-7px,5px);filter:blur(0.55px)}
+    25%{transform:scale(1.03) translate(6px,-4px);filter:blur(0.4px)}
+    37%{transform:scale(1.03) translate(-4px,-7px);filter:blur(0.6px)}
+    50%{transform:scale(1.03) translate(7px,6px);filter:blur(0.35px)}
+    62%{transform:scale(1.03) translate(-6px,2px);filter:blur(0.55px)}
+    75%{transform:scale(1.03) translate(3px,-6px);filter:blur(0.4px)}
+    87%{transform:scale(1.03) translate(-5px,7px);filter:blur(0.6px)}
   }
   @keyframes drift2{
-    0%,100%{transform:scale(1.02) translate(0,0);filter:blur(0)}
-    26%{transform:scale(1.02) translate(5px,5px);filter:blur(0.6px)}
-    52%{transform:scale(1.02) translate(-6px,3px);filter:blur(0.35px)}
-    78%{transform:scale(1.02) translate(4px,-5px);filter:blur(0.6px)}
+    0%,100%{transform:scale(1.03) translate(0,0);filter:blur(0.25px)}
+    13%{transform:scale(1.03) translate(6px,6px);filter:blur(0.55px)}
+    27%{transform:scale(1.03) translate(-7px,3px);filter:blur(0.4px)}
+    40%{transform:scale(1.03) translate(5px,-6px);filter:blur(0.6px)}
+    53%{transform:scale(1.03) translate(-4px,7px);filter:blur(0.35px)}
+    66%{transform:scale(1.03) translate(7px,-3px);filter:blur(0.55px)}
+    79%{transform:scale(1.03) translate(-6px,-5px);filter:blur(0.4px)}
+    90%{transform:scale(1.03) translate(4px,5px);filter:blur(0.6px)}
   }
   @keyframes bgOut{from{opacity:1}to{opacity:0}}
   @keyframes bgIn{from{opacity:0}to{opacity:1}}
