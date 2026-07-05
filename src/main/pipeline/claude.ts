@@ -424,6 +424,7 @@ export async function buildStoryIntroOutroCard(args: {
   durationSeconds: number
   set: StorySet
   images?: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>>
+  backdrops?: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>>
 }): Promise<string> {
   // NO safe-zone fit here: story-card heroes INTENTIONALLY bleed off the
   // frame edges and into the bottom margin (that's the storyboard design),
@@ -438,7 +439,8 @@ export async function buildStoryIntroOutroCard(args: {
     subscribe: args.subscribe,
     durationSeconds: args.durationSeconds,
     set: args.set,
-    images: args.images
+    images: args.images,
+    backdrops: args.backdrops
   })
 }
 

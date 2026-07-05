@@ -35,6 +35,15 @@ import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitl
 import { mergeExamTokens, buildAss } from './pipeline/captions'
 import { findProfileByName, findMusicByName } from './settings'
 
+// Full-frame design backgrounds (storyboard without texts) — mirror of the
+// runner's BG_SLOTS; a card's *_bg.png wins over its hero slot.
+const BG_SLOTS: Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string> = {
+  intro1: 'intro1_bg.png',
+  intro2: 'intro2_bg.png',
+  outro1: 'outro1_bg.png',
+  outro2: 'outro2_bg.png'
+}
+
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
   ipcMain.handle(IPC.SETTINGS_SET, (_e, patch: Partial<AppSettings>) => setSettings(patch))
@@ -299,30 +308,42 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           .filter((st) => {
             const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${st.id}`)
             const slots = st.imageSlots!
-            return (
+            const heroes =
               fs.existsSync(path.join(dir, slots.intro1)) &&
               fs.existsSync(path.join(dir, slots.intro2)) &&
               fs.existsSync(path.join(dir, slots.outro1))
-            )
+            const bgs =
+              fs.existsSync(path.join(dir, BG_SLOTS.intro1)) &&
+              fs.existsSync(path.join(dir, BG_SLOTS.intro2)) &&
+              fs.existsSync(path.join(dir, BG_SLOTS.outro1))
+            return heroes || bgs
           })
           .map((st) => st.id)
         const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
 
         let images: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
-        const assetCopies: { src: string; name: string }[] = []
+        let backdrops: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
+        const assetCopies: { src: string; name: string; trim: boolean }[] = []
         if (storySet.assetMode === 'image') {
           const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
           const slots = storySet.imageSlots!
           const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
             args.part === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
           images = {}
+          backdrops = {}
           for (const slot of needed) {
+            const bgFull = path.join(assetDir, BG_SLOTS[slot])
+            if (fs.existsSync(bgFull)) {
+              backdrops[slot] = `assets/${BG_SLOTS[slot]}`
+              assetCopies.push({ src: bgFull, name: BG_SLOTS[slot], trim: false })
+              continue
+            }
             const full = path.join(assetDir, slots[slot])
             if (fs.existsSync(full)) {
               images[slot] = `assets/${slots[slot]}`
-              assetCopies.push({ src: full, name: slots[slot] })
+              assetCopies.push({ src: full, name: slots[slot], trim: true })
             } else if (slot !== 'outro2' && !storySet.svgFallbackOk) {
-              return fail(`Template image missing: ${full} — add the PNG and preview again.`)
+              return fail(`Template image missing: ${full} (or ${BG_SLOTS[slot]}) — add a PNG and preview again.`)
             }
           }
         }
@@ -335,7 +356,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           subscribe: args.part === 'outro' ? !!io.subscribe : false,
           durationSeconds,
           set: storySet,
-          images
+          images,
+          backdrops
         })
 
         // 4) Render + mux with the same held-frame tail a full job uses
@@ -343,8 +365,10 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         const projectDir = path.join(previewDir, 'project')
         await scaffoldProject(projectDir, html)
         for (const a of assetCopies) {
-          // Auto-trim transparent borders so subjects fill their slots.
-          await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
+          // Heroes get their transparent borders trimmed; full-frame backdrops
+          // are used exactly as exported.
+          if (a.trim) await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
+          else await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
         }
         const rawMp4 = path.join(previewDir, 'render.mp4')
         send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${durationSeconds.toFixed(1)}s — takes ~30–60s)…`)

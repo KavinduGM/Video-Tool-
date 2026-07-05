@@ -52,6 +52,17 @@ const WIPE_ENTRY_TAIL_SECONDS = 0.35
 const MUSIC_VOLUME = 0.05
 const FADE: Transition = { type: 'fade', duration: 0.5 }
 
+// Full-frame design backgrounds (storyboard exported WITHOUT texts). When a
+// card's *_bg.png exists in the set folder it wins over the hero-slot mode:
+// the frame is used as a drifting backdrop and only texts animate on top.
+const BG_SLOTS: Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string> = {
+  intro1: 'intro1_bg.png',
+  intro2: 'intro2_bg.png',
+  outro1: 'outro1_bg.png',
+  outro2: 'outro2_bg.png'
+}
+
+
 export interface RunnerHandle {
   cancel(): void
 }
@@ -387,11 +398,15 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           .filter((s) => {
             const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${s.id}`)
             const slots = s.imageSlots!
-            return (
+            const heroes =
               fs.existsSync(path.join(dir, slots.intro1)) &&
               fs.existsSync(path.join(dir, slots.intro2)) &&
               fs.existsSync(path.join(dir, slots.outro1))
-            )
+            const bgs =
+              fs.existsSync(path.join(dir, BG_SLOTS.intro1)) &&
+              fs.existsSync(path.join(dir, BG_SLOTS.intro2)) &&
+              fs.existsSync(path.join(dir, BG_SLOTS.outro1))
+            return heroes || bgs
           })
           .map((s) => s.id)
         const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
@@ -403,26 +418,35 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
         // that's a usable stand-in (svgFallbackOk), otherwise fails loudly
         // with the exact expected path. The outro2 slot is always optional.
         let images: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
-        const assetCopies: { src: string; name: string }[] = []
+        let backdrops: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
+        const assetCopies: { src: string; name: string; trim: boolean }[] = []
         if (storySet.assetMode === 'image') {
           const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
           const slots = storySet.imageSlots!
           const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
             seg.mode === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
           images = {}
+          backdrops = {}
           const fallbacks: string[] = []
           for (const slot of needed) {
+            // Full-frame backdrop wins: the designer's own frame, texts only on top.
+            const bgFull = path.join(assetDir, BG_SLOTS[slot])
+            if (fs.existsSync(bgFull)) {
+              backdrops[slot] = `assets/${BG_SLOTS[slot]}`
+              assetCopies.push({ src: bgFull, name: BG_SLOTS[slot], trim: false })
+              continue
+            }
             const file = slots[slot]
             const full = path.join(assetDir, file)
             if (fs.existsSync(full)) {
               images[slot] = `assets/${file}`
-              assetCopies.push({ src: full, name: file })
+              assetCopies.push({ src: full, name: file, trim: true })
             } else if (slot === 'outro2') {
               continue // always optional
             } else if (storySet.svgFallbackOk) {
               fallbacks.push(slot)
             } else {
-              throw new Error(`template image missing: ${full} — add the PNG there (transparent background) and re-run`)
+              throw new Error(`template image missing: ${full} (or ${BG_SLOTS[slot]}) — add a PNG there and re-run`)
             }
           }
           if (assetCopies.length > 0) {
@@ -441,14 +465,20 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           subscribe: seg.subscribe,
           durationSeconds: audioDuration,
           set: storySet,
-          images
+          images,
+          backdrops
         })
         await scaffoldProject(projectDir, html)
         for (const a of assetCopies) {
-          // Auto-trim the transparent border so the subject fills its slot
-          // like a tight sticker, regardless of how the PNG was exported.
-          const t = await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
-          if (t.trimmed && t.crop) cb.onLog(info(`${seg.label}: auto-trimmed ${a.name} transparent border → ${t.crop.split(':').slice(0, 2).join('×')}px`))
+          if (a.trim) {
+            // Auto-trim the transparent border so the subject fills its slot
+            // like a tight sticker, regardless of how the PNG was exported.
+            const t = await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
+            if (t.trimmed && t.crop) cb.onLog(info(`${seg.label}: auto-trimmed ${a.name} transparent border → ${t.crop.split(':').slice(0, 2).join('×')}px`))
+          } else {
+            // Full-frame backdrops are used as exported — never trimmed.
+            await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
+          }
         }
         if (handle.cancelled) throw new Error('Cancelled')
         const rawMp4 = path.join(segDir, 'render_story.mp4')

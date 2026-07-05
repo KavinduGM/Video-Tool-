@@ -621,6 +621,14 @@ export interface StoryCardSpec {
   set: StorySet
   /** for image sets: resolved hrefs per hero slot (e.g. "assets/intro1_hero.png") */
   images?: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>>
+  /**
+   * Full-frame 1080×1920 design backgrounds (the storyboard WITHOUT texts),
+   * one per card. When a card has a backdrop, its hero slot is skipped (the
+   * imagery is baked in), the frame gets a slow cinematic drift ("Ken
+   * Burns") so the still feels alive, and only the text/badge/CTA layers
+   * animate on top. Placement fidelity is perfect by construction.
+   */
+  backdrops?: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>>
 }
 
 function textSizeFor(text: string): number {
@@ -729,8 +737,23 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
     return `<div class="heroA" style="${xCss};${yCss}"><div class="pop" style="animation-delay:${delay.toFixed(2)}s"><div class="float" style="animation-delay:${(delay + 0.8).toFixed(2)}s">${heroFor(slot, box)}</div></div></div>`
   }
 
-  const hero1Abs = heroAbs(spec.kind === 'intro' ? 'intro1' : 'outro1', hero1Delay)
-  const hero2Html = spec.kind === 'intro' ? heroAbs('intro2', hero2Delay) : ''
+  const card1Key: CardKey = spec.kind === 'intro' ? 'intro1' : 'outro1'
+  const card2Key: CardKey = spec.kind === 'intro' ? 'intro2' : 'outro2'
+  const bg1 = spec.backdrops?.[card1Key]
+  const bg2 = spec.backdrops?.[card2Key]
+  // A card with a full-frame backdrop needs no hero — the imagery is baked in.
+  const hero1Abs = bg1 ? '' : heroAbs(spec.kind === 'intro' ? 'intro1' : 'outro1', hero1Delay)
+  const hero2Html = spec.kind === 'intro' && !bg2 ? heroAbs('intro2', hero2Delay) : ''
+  // Backdrops live directly under #stage (full frame, outside the safe area),
+  // swap in sync with the scenes (fade), and drift slowly so the still image
+  // feels alive: scene 1 zooms in gently, scene 2 settles back.
+  const backdropHtml =
+    (bg1
+      ? `<div class="bgwrap bgsc1" style="animation-delay:${exitDelay.toFixed(2)}s"><img class="bgimg" style="animation-duration:${(tSplit + 0.4).toFixed(2)}s" src="${bg1}" alt=""/></div>`
+      : '') +
+    (bg2
+      ? `<div class="bgwrap bgsc2" style="animation-delay:${tSplit.toFixed(2)}s"><img class="bgimg kb2" style="animation-delay:${tSplit.toFixed(2)}s;animation-duration:${Math.max(1, D - tSplit + 0.3).toFixed(2)}s" src="${bg2}" alt=""/></div>`
+      : '')
 
   // Scene wrapper styles: per-card top padding + text alignment.
   const card1: CardKey = spec.kind === 'intro' ? 'intro1' : 'outro1'
@@ -789,6 +812,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
        overflow-wrap:normal;word-break:keep-all;margin-top:18px}
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
+  .bgwrap{position:absolute;inset:0;overflow:hidden}
+  .bgimg{width:1080px;height:1920px;object-fit:cover;animation-name:kb1;animation-timing-function:ease-in-out;animation-fill-mode:both;animation-iteration-count:1}
+  .kb2{animation-name:kb2}
+  .bgsc1{animation:bgOut .35s ease-in both;animation-iteration-count:1}
+  .bgsc2{opacity:0;animation:bgIn .35s ease-out both;animation-iteration-count:1}
   .heroA{position:absolute;left:50%;transform:translateX(-50%)}
   .heroA .pop{opacity:0}
   .imgslot{display:flex;align-items:center;justify-content:center}
@@ -816,10 +844,15 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
   @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
+  @keyframes kb1{from{transform:scale(1) translate(0,0)}to{transform:scale(1.06) translate(-10px,-8px)}}
+  @keyframes kb2{from{transform:scale(1.05) translate(8px,6px)}to{transform:scale(1) translate(0,0)}}
+  @keyframes bgOut{from{opacity:1}to{opacity:0}}
+  @keyframes bgIn{from{opacity:0}to{opacity:1}}
 </style>
 </head>
 <body>
 <div id="stage" data-composition-id="main" data-width="1080" data-height="1920" data-duration="${D.toFixed(3)}">
+  ${backdropHtml}
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
