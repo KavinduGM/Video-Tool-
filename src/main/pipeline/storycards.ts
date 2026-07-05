@@ -569,23 +569,31 @@ function assetSvg(id: AssetId, px: number): string {
   }
 }
 
-function arrowSvgStyled(style: ArrowStyle, color: string, px: number): string {
+/**
+ * Outro arrow with a DRAW-ON reveal: the shaft/curve stroke writes itself
+ * from its start (stroke-dash animation), then the head lands — "starting,
+ * curving, pointing, stop". After the draw, the idle bob keeps it alive
+ * until the voice ends. Delays are absolute (seconds into the card).
+ */
+function arrowSvgStyled(style: ArrowStyle, color: string, px: number, drawDelay = 0): string {
   const W = Math.round(px * 0.5)
+  const d1 = drawDelay.toFixed(2)
+  const d2 = (drawDelay + 0.7).toFixed(2)
   switch (style) {
     case 'block':
       return `<svg viewBox="0 0 120 260" width="${W}" aria-hidden="true">
-  <path d="M60 8 L60 182" stroke="${color}" stroke-width="26" stroke-linecap="round" fill="none"/>
-  <polygon points="18,174 102,174 60,248" fill="${color}"/>
+  <path class="adraw" style="animation-delay:${d1}s" d="M60 8 L60 182" stroke="${color}" stroke-width="26" stroke-linecap="round" fill="none"/>
+  <polygon class="ahead" style="animation-delay:${d2}s" points="18,174 102,174 60,248" fill="${color}"/>
 </svg>`
     case 'thin':
       return `<svg viewBox="0 0 100 340" width="${Math.round(W * 0.46)}" aria-hidden="true">
-  <path d="M50 6 L50 306" stroke="${color}" stroke-width="11" stroke-linecap="round" fill="none"/>
-  <path d="M14 262 L50 330 L86 262" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path class="adraw" style="animation-delay:${d1}s" d="M50 6 L50 306" stroke="${color}" stroke-width="11" stroke-linecap="round" fill="none"/>
+  <path class="ahead" style="animation-delay:${d2}s" d="M14 262 L50 330 L86 262" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>`
     case 'curved':
       return `<svg viewBox="0 0 160 200" width="${Math.round(W * 1.1)}" aria-hidden="true">
-  <path d="M118 10 q30 60 -8 106 q-24 30 -62 34" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round"/>
-  <path d="M78 122 L44 152 L86 168" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="adraw" style="animation-delay:${d1}s" d="M118 10 q30 60 -8 106 q-24 30 -62 34" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <path class="ahead" style="animation-delay:${d2}s" d="M78 122 L44 152 L86 168" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`
   }
 }
@@ -784,7 +792,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
     ? `${ctaImgHtml}
       <div class="cta-pop" style="animation-delay:${pillDelay.toFixed(2)}s">${pillHtml(set, pulseDelay)}</div>
       <div class="arrow-pop" style="animation-delay:${arrowDelay.toFixed(2)}s">
-        <div class="bob" style="animation-delay:${bobDelay.toFixed(2)}s">${arrowSvgStyled(set.arrowStyle, set.arrowColor, 520)}</div>
+        <div class="bob" style="animation-delay:${bobDelay.toFixed(2)}s">${arrowSvgStyled(set.arrowStyle, set.arrowColor, 520, arrowDelay + 0.1)}</div>
       </div>`
     : ''
 
@@ -813,8 +821,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
   .bgwrap{position:absolute;inset:0;overflow:hidden}
-  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 1.1s ease-in-out infinite}
-  .drift2{animation:drift2 1.3s ease-in-out infinite}
+  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 1.5s ease-in-out infinite}
+  .drift2{animation:drift2 1.7s ease-in-out infinite}
   .bgsc1{animation:bgOut .35s ease-in both;animation-iteration-count:1}
   .bgsc2{opacity:0;animation:bgIn .35s ease-out both;animation-iteration-count:1}
   .heroA{position:absolute;left:50%;transform:translateX(-50%)}
@@ -835,6 +843,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   .sub-outline .sub-label{color:${set.ink}}
   .sub-label{font-weight:800;font-size:38px;letter-spacing:1px;font-style:normal}
   .arrow-pop{align-self:center;margin-top:30px;opacity:0;animation:wIn .5s ease-out both;animation-iteration-count:1}
+  .adraw{stroke-dasharray:420;stroke-dashoffset:420;animation:adraw .8s ease-in-out both;animation-iteration-count:1}
+  .ahead{opacity:0;animation:ahead .22s ease-out both;animation-iteration-count:1}
   .bob{animation:bob 1.6s ease-in-out infinite}
   @keyframes wIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
   @keyframes drop{from{opacity:0;transform:translateY(-26px)}to{opacity:1;transform:none}}
@@ -844,6 +854,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
   @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
+  @keyframes adraw{to{stroke-dashoffset:0}}
+  @keyframes ahead{from{opacity:0}to{opacity:1}}
   /* Camera-jitter: VISIBLE rapid x/y trembling at small amplitude (±7px,
      ~1.1s/1.3s per cycle through 8 waypoints ≈ 60-90px/s of on-screen
      velocity — clearly alive, never a large move). A light pulsing blur
