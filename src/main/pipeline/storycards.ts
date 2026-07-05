@@ -461,7 +461,7 @@ export const STORY_SETS: StorySet[] = [
   {
     id: 6,
     name: 'navy',
-    bg: '#1B3A75',
+    bg: '#16337B',
     ink: '#FFFFFF',
     font: 'Archivo',
     weights: '700;800;900',
@@ -471,12 +471,57 @@ export const STORY_SETS: StorySet[] = [
     align: 'left',
     badge: { bg: '#101010', ink: '#FFFFFF', spaced: true },
     arrowStyle: 'block',
-    arrowColor: '#A9C6E8',
+    arrowColor: '#B7CFE9',
     pill: 'subscribed',
     assets: { intro1: 'tower', intro2: 'skyscraper', outro1: 'house' },
     assetMode: 'image',
     svgFallbackOk: true,
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-6 design frames (backdrop-first).
+    // Italic spaced caps on deep navy, left-aligned at padLeft 25 (intro2 at
+    // 70). Black italic badge at the safe top (font 72); intro1 title abs
+    // y≈333 @138/24ch; intro2 abs y≈268 @112/26ch; outro1 abs y≈293
+    // @118/31ch. Outro2 centered: text abs y≈207 @100/43ch, "Subscribed"
+    // pill abs y≈853 (font 72), light-blue block arrow abs y≈1282 (design
+    // 573 — safe-zone clamp renders what fits above the caption zone).
+    layouts: {
+      intro1: {
+        padTop: 0,
+        padLeft: 25,
+        badgeFontPx: 72,
+        txtTop: 173,
+        fontPx: 138,
+        fontBaseChars: 24,
+        hero: { w: 560, h: 950, x: 'center', top: 830 }
+      },
+      intro2: {
+        padTop: 0,
+        padLeft: 70,
+        txtTop: 108,
+        fontPx: 112,
+        fontBaseChars: 26,
+        hero: { w: 640, h: 990, x: 'center', top: 790 }
+      },
+      outro1: {
+        padTop: 0,
+        padLeft: 25,
+        txtTop: 133,
+        fontPx: 118,
+        fontBaseChars: 31,
+        hero: { w: 900, h: 850, x: 'center', top: 890 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 47,
+        textAlign: 'center',
+        fontPx: 100,
+        fontBaseChars: 43,
+        pillTop: 693,
+        pillFontPx: 72,
+        arrowTop: 1122,
+        arrowH: 573
+      }
+    }
   },
   {
     id: 7,
@@ -910,7 +955,9 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const badgeSizeCss = badgeFontPx
     ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.3)}px ${Math.round(badgeFontPx * 0.5)}px;border-radius:${Math.round(badgeFontPx * 0.44)}px;`
     : ''
-  const badgeAlignCss = set.layouts?.intro1?.badgeAlign === 'center' ? 'align-self:center;' : ''
+  const badgeAlignCss =
+    (set.layouts?.intro1?.badgeAlign === 'center' ? 'align-self:center;' : '') +
+    (set.italic ? 'font-style:italic;' : '')
   const badgeHtml =
     spec.kind === 'intro' && spec.badge
       ? `<div class="badge" style="${badgeSizeCss}${badgeAlignCss}animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
