@@ -813,8 +813,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
   .bgwrap{position:absolute;inset:0;overflow:hidden}
-  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 5.9s ease-in-out infinite}
-  .drift2{animation:drift2 7s ease-in-out infinite}
+  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 4.7s ease-in-out infinite}
+  .drift2{animation:drift2 5.6s ease-in-out infinite}
   .bgsc1{animation:bgOut .35s ease-in both;animation-iteration-count:1}
   .bgsc2{opacity:0;animation:bgIn .35s ease-out both;animation-iteration-count:1}
   .heroA{position:absolute;left:50%;transform:translateX(-50%)}
