@@ -31,7 +31,7 @@ import { pickStorySet, STORY_SETS } from './pipeline/storycards'
 import { buildStoryIntroOutroCard } from './pipeline/claude'
 import { scaffoldProject, renderHyperframes } from './pipeline/hyperframes'
 import { generateAudioWithTimestamps } from './pipeline/tts'
-import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitles } from './pipeline/ffmpeg'
+import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitles, trimPngAlpha } from './pipeline/ffmpeg'
 import { mergeExamTokens, buildAss } from './pipeline/captions'
 import { findProfileByName, findMusicByName } from './settings'
 
@@ -343,7 +343,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         const projectDir = path.join(previewDir, 'project')
         await scaffoldProject(projectDir, html)
         for (const a of assetCopies) {
-          await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
+          // Auto-trim transparent borders so subjects fill their slots.
+          await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
         }
         const rawMp4 = path.join(previewDir, 'render.mp4')
         send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${durationSeconds.toFixed(1)}s — takes ~30–60s)…`)

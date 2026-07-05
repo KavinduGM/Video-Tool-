@@ -652,6 +652,60 @@ export async function sampleInkFractions(
  * encoded as a JPEG for passing to Claude's vision API. Captures near the end
  * by default so the composition is in its final, settled state.
  */
+/**
+ * Auto-trim a PNG's transparent border. Template PNGs exported from design
+ * tools (Canva etc.) carry large transparent margins around the subject —
+ * those empty pixels count as image, shrinking the subject inside its slot
+ * box. This detects the alpha bounding box (alphaextract + cropdetect) and
+ * crops to it, so every hero PNG behaves like a tight "sticker" regardless
+ * of how it was exported. Falls back to a plain copy when detection fails
+ * or there is nothing to trim.
+ */
+export async function trimPngAlpha(
+  args: { src: string; dest: string },
+  onLog?: (l: string) => void
+): Promise<{ trimmed: boolean; crop?: string }> {
+  let lastCrop: string | null = null
+  try {
+    await runFfmpeg(
+      [
+        '-y',
+        // -loop with skip=0: cropdetect skips its first 2 frames by default,
+        // and a PNG has only one — loop the still and disable the skip.
+        '-loop', '1',
+        '-i', args.src,
+        '-vf', 'format=rgba,alphaextract,cropdetect=limit=8:round=2:reset=0:skip=0',
+        '-frames:v', '2',
+        '-f', 'null',
+        process.platform === 'win32' ? 'NUL' : '/dev/null'
+      ],
+      (line) => {
+        const m = line.match(/crop=(\d+:\d+:\d+:\d+)/)
+        if (m) lastCrop = m[1]
+        onLog?.(line)
+      }
+    )
+  } catch {
+    lastCrop = null
+  }
+  if (lastCrop) {
+    const [w, h] = (lastCrop as string).split(':').map((n) => parseInt(n, 10))
+    if (w > 8 && h > 8) {
+      try {
+        await runFfmpeg(
+          ['-y', '-i', args.src, '-vf', `format=rgba,crop=${lastCrop}`, '-frames:v', '1', args.dest],
+          onLog
+        )
+        return { trimmed: true, crop: lastCrop }
+      } catch {
+        /* fall through to plain copy */
+      }
+    }
+  }
+  await fs.promises.copyFile(args.src, args.dest)
+  return { trimmed: false }
+}
+
 export async function extractFrame(
   args: { videoIn: string; atSeconds: number; out: string; quality?: number },
   onLog?: (l: string) => void

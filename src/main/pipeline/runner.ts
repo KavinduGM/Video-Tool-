@@ -26,6 +26,7 @@ import {
   buildWipeTransitionClip,
   verifyTransitionClip,
   pickTransitionStyle,
+  trimPngAlpha,
   WIPE_TRANSITION_SECONDS,
   probeDurationSeconds,
   sampleInkFractions,
@@ -444,7 +445,10 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
         })
         await scaffoldProject(projectDir, html)
         for (const a of assetCopies) {
-          await fs.promises.copyFile(a.src, path.join(projectDir, 'assets', a.name))
+          // Auto-trim the transparent border so the subject fills its slot
+          // like a tight sticker, regardless of how the PNG was exported.
+          const t = await trimPngAlpha({ src: a.src, dest: path.join(projectDir, 'assets', a.name) })
+          if (t.trimmed && t.crop) cb.onLog(info(`${seg.label}: auto-trimmed ${a.name} transparent border → ${t.crop.split(':').slice(0, 2).join('×')}px`))
         }
         if (handle.cancelled) throw new Error('Cancelled')
         const rawMp4 = path.join(segDir, 'render_story.mp4')

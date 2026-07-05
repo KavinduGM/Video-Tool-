@@ -207,14 +207,14 @@ export const STORY_SETS: StorySet[] = [
         padTop: 140,
         padLeft: 16,
         fontPx: 130,
-        badgeFontPx: 100,
-        hero: { w: 900, h: 550, x: 'right-bleed', bleed: 20, top: 1067 }
+        badgeFontPx: 92, // 100 measured, but 92 guarantees ONE line (nowrap) inside the safe width
+        hero: { w: 940, h: 560, x: 'right-bleed', bleed: 20, top: 1055 }
       },
       intro2: {
         padTop: 990,
         textAlign: 'right',
         fontPx: 138,
-        hero: { w: 1030, h: 700, x: 'left-bleed', bleed: 20, top: 87 }
+        hero: { w: 1045, h: 700, x: 'left-bleed', bleed: 20, top: 87 }
       },
       outro1: { padTop: 20, hero: { w: 620, h: 750, x: 'center', bottom: -20 } },
       outro2: { padTop: 430, textAlign: 'center' }
@@ -765,7 +765,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   .scene{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-start;gap:44px;box-sizing:border-box}
   .sc1{animation:scOut .35s ease-in both;animation-delay:${exitDelay.toFixed(2)}s;animation-iteration-count:1}
   .sc2{opacity:0;animation:scIn .35s ease-out both;animation-delay:${tSplit.toFixed(2)}s;animation-iteration-count:1}
-  .badge{display:inline-block;background:${set.badge.bg};color:${set.badge.ink};font-weight:800;font-size:34px;${badgeSpacedCss}
+  .badge{display:inline-block;white-space:nowrap;background:${set.badge.bg};color:${set.badge.ink};font-weight:800;font-size:34px;${badgeSpacedCss}
          padding:12px 28px;border-radius:14px;margin-top:26px;align-self:flex-start;opacity:0;animation:drop .45s cubic-bezier(.2,.8,.3,1.15) both;animation-iteration-count:1}
   .txt{color:${set.ink};font-weight:900;${capsCss}${italicCss}${spacedCss}line-height:1.16;max-width:100%;
        overflow-wrap:normal;word-break:keep-all;margin-top:18px}
