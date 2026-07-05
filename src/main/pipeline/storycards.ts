@@ -1,17 +1,25 @@
 // =====================================================================
 // STORY TEMPLATE CARDS — 2-scene intro / 2-scene outro (storyboard style)
 // =====================================================================
-// The official State Exams Prep template pack: 10 sets translated from
-// the user's editor storyboards. Each set defines the whole look — bg,
-// font treatment, badge style, alignment, arrow style, subscribe-pill
-// style, hero assets — and one video always uses one set for both intro
-// and outro (hash-picked from the video name, overridable via
-// `template_set:` in the script).
+// The State Exams Prep template pack (10 sets). PRODUCTION MODEL, settled
+// while fine-tuning Set 3:
 //
-// Sets 1/2/4/5/6 are fully code-drawn (flat SVG heroes). Sets 3/7/8/9/10
-// are REAL-IMAGE sets: the artist's transparent PNGs fill fixed hero
-// slots (template-assets/set-<id>/), and a set only enters the auto-pick
-// rotation once its PNGs are present. Everything is composed
+//   1. BACKDROP-FIRST: the designer exports each card's full 1080×1920
+//      frame WITHOUT texts as template-assets/set-<id>/<card>_bg.png.
+//      The frame renders full-bleed with the camera-jitter drift; the
+//      system animates badge, scene texts, subscribe pill and the
+//      self-drawing arrow on top at positions MEASURED from the exact
+//      design frames (per-set `layouts`).
+//   2. Hero-slot PNGs (<card>_hero.png, auto-trimmed cutouts) remain a
+//      supported alternative — a card uses its backdrop when present,
+//      else its hero PNG, else legacy code-drawn SVG art.
+//   3. Auto-pick rotation includes ONLY sets with real uploaded designs;
+//      one video always uses one set for both intro and outro
+//      (hash-picked from the video name, `template_set:` overrides).
+//
+// Set 3 ("stone") is fully measured and production-ready. The other
+// sets keep neutral default layouts until their design frames arrive
+// and get their own measuring pass. Everything is composed
 // deterministically — no AI, byte-identical output for the same input.
 // =====================================================================
 
@@ -202,13 +210,9 @@ export const STORY_SETS: StorySet[] = [
     assets: { intro1: 'house', intro2: 'key', outro1: 'bulb' }, // svg fallback only
     assetMode: 'image',
     imageSlots: STD_SLOTS,
-    // INTRO measured 1:1 from the Set-3 intro storyboard (panel fractions →
-    // 1080×1920, hero tops are safe-relative): oversized badge top-left at
-    // abs y≈344 (font ≈88px), title at abs y≈589 (≈114px); the hand+keys
-    // strip sits at abs y 1150–1590 with the arm bleeding off the RIGHT
-    // edge; scene 2's hand+house is huge (top abs y≈130, sleeve bleeding
-    // off the LEFT edge) with the text lower-right at abs y≈1140 (≈96px).
-    // Outro layouts are pending their own fine-tune pass.
+    // PRODUCTION-READY (user-approved). Measured from the exact 1080×1920
+    // design frames; runs backdrop-first from template-assets/set-3/*_bg.png.
+    // Hero-layout entries below only matter for the legacy hero-PNG mode.
     layouts: {
       // Measured from the user's exact 1080×1920 design frames:
       // badge y=298 font≈100 · title y≈560 font≈130 · hand strip abs
@@ -380,15 +384,20 @@ function hash(s: string): number {
 }
 
 /**
- * Same seed → same set, so intro and outro always match. Auto-pick draws from
- * the code-drawn sets plus any image sets whose PNGs are confirmed available
- * (the runner passes those ids). Explicit template_set overrides everything.
+ * Same seed → same set, so intro and outro always match. The auto-pick pool
+ * is ONLY the sets whose real designs are uploaded (backdrop or hero PNGs —
+ * the runner passes those ids); my code-drawn stand-ins never ship in
+ * production rotation. If NOTHING is uploaded yet, fall back to the
+ * svgFallbackOk stand-ins so a job still completes. Explicit template_set
+ * overrides everything.
  */
 export function pickStorySet(seed: string, override?: number, availableImageSets: number[] = []): StorySet {
   if (override && override >= 1) {
     return STORY_SETS[(override - 1) % STORY_SETS.length]
   }
-  const pool = STORY_SETS.filter((s) => s.svgFallbackOk || availableImageSets.includes(s.id))
+  let pool = STORY_SETS.filter((s) => availableImageSets.includes(s.id))
+  if (pool.length === 0) pool = STORY_SETS.filter((s) => s.svgFallbackOk)
+  if (pool.length === 0) pool = STORY_SETS
   return pool[hash(`story:${seed}`) % pool.length]
 }
 
