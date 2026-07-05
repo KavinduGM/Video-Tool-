@@ -102,6 +102,7 @@ CONCEPT>>>
 
 EXACT VALUES the script MUST use verbatim:
 - video_name: ${t.videoName}
+- exam_name: "${t.examName}"
 - ratio: "9:16"
 - output_folder: ${t.outputFolder}
 - voice_profile: ${t.voiceProfile}
@@ -130,10 +131,11 @@ description: |
   everything inside the safe area; the bottom is reserved for captions.
 
 INTRO (2 scenes — the system renders scene1 then scene2):
+- The system shows a highlighted badge chip with "${t.examName}" ABOVE scene1 automatically — so scene1 must NOT contain the exam name (it would double up).
 - voiceover: 1–2 punchy sentences, 15–40 words, MUST include "${t.examName}".
-- scene1: MUST START with "${t.examName}" — the exam name is ALWAYS the first thing viewers read. Short (max ~45 characters total).
+- scene1: a short punchy hook WITHOUT the exam name (max ~45 characters), e.g. "Most students miss this."
 - scene2: a short momentum line (max ~45 characters).
-Style inspiration (swap {EXAM} → ${t.examName}; write your OWN variant that fits this concept):
+Style inspiration (the {EXAM} prefix in these examples is now carried by the badge — output only the hook part; write your OWN variant that fits this concept):
 ${HOOK_EXAMPLES}
 
 OUTRO (2 scenes — UNIVERSAL, must NOT mention the exam name anywhere):
@@ -160,6 +162,7 @@ VOICEOVERS: conversational exam-coach tone, drawn from the concept text (its tra
 EXACT YAML SHAPE — the parser is STRICT. Use ONLY these keys, nowhere else, no extras (no id, no name, no title, no notes — an unknown key REJECTS the whole script):
 
 video_name: …
+exam_name: "…"
 ratio: "9:16"
 output_folder: …
 voice_profile: …
@@ -260,6 +263,8 @@ export function validateGeneratedScript(yaml: string, expect: FactoryExpectation
   if (spec.video_name !== expect.videoName) errors.push(`video_name must be exactly "${expect.videoName}" (got "${spec.video_name}")`)
   if (spec.ratio !== '9:16') errors.push('ratio must be "9:16"')
   if ((spec.channel ?? '') !== expect.channel) errors.push(`channel must be "${expect.channel}"`)
+  if ((spec.exam_name ?? '') !== expect.examName)
+    errors.push(`exam_name must be exactly "${expect.examName}" — it becomes the highlighted badge on the video`)
   if (spec.voice_profile !== expect.voiceProfile) errors.push(`voice_profile must be "${expect.voiceProfile}"`)
   if (expect.backgroundMusic && spec.background_music !== expect.backgroundMusic)
     errors.push(`background_music must be "${expect.backgroundMusic}"`)
@@ -270,8 +275,8 @@ export function validateGeneratedScript(yaml: string, expect: FactoryExpectation
   if (!spec.intro) errors.push('intro section is missing')
   else {
     if (!spec.intro.scene1 || !spec.intro.scene2) errors.push('intro needs BOTH scene1 and scene2')
-    if (spec.intro.scene1 && !spec.intro.scene1.toLowerCase().startsWith(exam))
-      errors.push(`intro scene1 must START with the exam name "${expect.examName}"`)
+    if (spec.intro.scene1 && spec.intro.scene1.toLowerCase().includes(exam))
+      errors.push('intro scene1 must NOT contain the exam name — the badge chip above it already shows it; use a pure hook line')
     if (spec.intro.scene1 && spec.intro.scene1.length > 60) errors.push('intro scene1 too long (max 60 chars)')
     if (spec.intro.scene2 && spec.intro.scene2.length > 60) errors.push('intro scene2 too long (max 60 chars)')
     if (!spec.intro.voiceover.toLowerCase().includes(exam)) errors.push('intro voiceover must mention the exam name')

@@ -403,7 +403,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
             kind: part,
             scene1: a.io.scene1!,
             scene2: a.io.scene2!,
-            badge: spec.channel,
+            badge: spec.exam_name || spec.channel,
             subscribe: part === 'outro' ? !!a.io.subscribe : false,
             durationSeconds: a.durationSeconds,
             set: storySet,

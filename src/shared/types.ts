@@ -61,7 +61,8 @@ export interface ScriptSpec {
   voice_speed?: number
   background_music?: string // name of a saved music profile (intro/outro bed)
   captions?: boolean // burned-in karaoke captions (default true)
-  channel?: string // channel name — shown as the badge chip on story intros
+  channel?: string // channel name (metadata; NOT shown on the video)
+  exam_name?: string // exam display name — shown as the highlighted badge chip on story intros
   template_set?: number // force a specific story template set (otherwise hash-picked)
   style?: {
     description?: string

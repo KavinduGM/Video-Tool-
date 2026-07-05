@@ -461,7 +461,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           kind: seg.mode,
           scene1: seg.scene1,
           scene2: seg.scene2,
-          badge: spec.channel,
+          badge: spec.exam_name || spec.channel,
           subscribe: seg.subscribe,
           durationSeconds: audioDuration,
           set: storySet,

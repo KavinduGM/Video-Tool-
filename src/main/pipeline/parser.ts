@@ -26,6 +26,7 @@ const ALLOWED_TOP_LEVEL = new Set([
   'background_music',
   'captions',
   'channel',
+  'exam_name',
   'template_set',
   'style',
   // Style fields are also accepted at the top level for ergonomics.
@@ -96,6 +97,7 @@ export function parseScript(yaml: string): ScriptSpec {
   const captions = r.captions === false || r.captions === 'false' ? false : undefined
 
   const channel = r.channel !== undefined ? requireString(r, 'channel') : undefined
+  const exam_name = r.exam_name !== undefined ? requireString(r, 'exam_name') : undefined
   const template_set =
     r.template_set !== undefined ? requireNumber(r, 'template_set', 1, 50) : undefined
 
@@ -119,6 +121,7 @@ export function parseScript(yaml: string): ScriptSpec {
     background_music,
     captions,
     channel,
+    exam_name,
     template_set,
     style,
     intro,
