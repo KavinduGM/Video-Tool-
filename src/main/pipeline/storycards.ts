@@ -43,7 +43,7 @@ export type AssetId =
   | 'magnifier'
   | 'handshake'
 
-export type ArrowStyle = 'block' | 'thin' | 'curved'
+export type ArrowStyle = 'block' | 'thin' | 'curved' | 'slim'
 export type PillStyle = 'light' | 'dark' | 'outline' | 'subscribed'
 
 export interface StorySet {
@@ -133,6 +133,10 @@ export interface CardLayout {
   arrowTop?: number
   /** outro-2 CTA: exact arrow height (px) — replaces the flow-computed fit */
   arrowH?: number
+  /** the design text length (chars) fontPx was measured at — longer texts shrink from here (default 30) */
+  fontBaseChars?: number
+  /** badge chip alignment on intro scene 1 (default left) */
+  badgeAlign?: 'left' | 'center'
   hero?: HeroLayout
 }
 
@@ -141,8 +145,8 @@ export interface CardLayout {
  * storyboard's (~30 chars) so per-video lines wrap like the board instead of
  * overflowing. Short texts render at the exact measured size.
  */
-export function effectiveFontPx(fontPx: number, text: string): number {
-  return Math.min(fontPx, Math.round((fontPx * 30) / Math.max(30, text.length)))
+export function effectiveFontPx(fontPx: number, text: string, baseChars = 30): number {
+  return Math.min(fontPx, Math.round((fontPx * baseChars) / Math.max(baseChars, text.length)))
 }
 
 /** Generic storyboard layout: text at the top, hero large and bottom-center. */
@@ -233,13 +237,54 @@ export const STORY_SETS: StorySet[] = [
     spaced: false,
     align: 'center',
     badge: { bg: '#101010', ink: '#FFFFFF' },
-    arrowStyle: 'thin',
+    arrowStyle: 'slim',
     arrowColor: '#101010',
     pill: 'light',
     assets: { intro1: 'facade', intro2: 'docpencil', outro1: 'checkcircle' },
     assetMode: 'image',
     svgFallbackOk: true,
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-2 design frames (backdrop-first).
+    // Centered composition: black badge centered at abs y≈281 (font 92),
+    // titles centered (intro1 abs y≈555 @142/21ch · intro2 abs y≈237
+    // @124/39ch · outro1 abs y≈293 @132/20ch · outro2 abs y≈172 @122/43ch);
+    // pill abs y≈939 font 82; SLIM arrow (thin shaft, solid head) abs
+    // y≈1221, height 520.
+    layouts: {
+      intro1: {
+        padTop: 121,
+        badgeFontPx: 92,
+        badgeAlign: 'center',
+        txtTop: 395,
+        fontPx: 142,
+        fontBaseChars: 21,
+        hero: { w: 900, h: 900, x: 'center', top: 800 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 77,
+        fontPx: 124,
+        fontBaseChars: 39,
+        hero: { w: 520, h: 660, x: 'center', top: 945 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 133,
+        fontPx: 132,
+        fontBaseChars: 20,
+        hero: { w: 700, h: 700, x: 'center', top: 840 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 12,
+        fontPx: 122,
+        fontBaseChars: 43,
+        pillTop: 779,
+        pillFontPx: 82,
+        arrowTop: 1061,
+        arrowH: 520
+      }
+    }
   },
   {
     id: 3,
@@ -653,6 +698,11 @@ function arrowSvgStyled(style: ArrowStyle, color: string, heightPx: number, draw
       return `<svg viewBox="0 0 100 340" height="${Math.round(H * 0.75)}" aria-hidden="true">
   <path class="adraw" style="animation-delay:${d1}s" d="M50 6 L50 322 M16 266 L50 330 L84 266" stroke="${color}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>`
+    case 'slim':
+      // Thin shaft + SOLID filled triangular head, one polygon (Set-2 design).
+      return `<svg viewBox="0 0 240 520" height="${H}" aria-hidden="true">
+  <polygon class="ahead" style="animation-delay:${d1}s" points="108,10 132,10 132,360 230,360 120,510 10,360 108,360" fill="${color}"/>
+</svg>`
     case 'curved':
       // Long sweeping curve; head barbs computed from the curve-end tangent
       // (tip 46,232) so the point always caps the stroke exactly.
@@ -771,9 +821,10 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const badgeSizeCss = badgeFontPx
     ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.3)}px ${Math.round(badgeFontPx * 0.5)}px;border-radius:${Math.round(badgeFontPx * 0.44)}px;`
     : ''
+  const badgeAlignCss = set.layouts?.intro1?.badgeAlign === 'center' ? 'align-self:center;' : ''
   const badgeHtml =
     spec.kind === 'intro' && spec.badge
-      ? `<div class="badge" style="${badgeSizeCss}animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
+      ? `<div class="badge" style="${badgeSizeCss}${badgeAlignCss}animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
       : ''
 
   // Per-card layouts: the set's storyboard-tuned overrides on top of the
@@ -861,7 +912,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // so the arrow can only ever err SMALLER — cropping is impossible.
   const SAFE_H = 1380 // 1920 − 160 top − 380 caption margin
   const l2cta = layoutFor(card2)
-  const font2 = l2cta.fontPx ? effectiveFontPx(l2cta.fontPx, spec.scene2) : textSizeFor(spec.scene2)
+  const font2 = l2cta.fontPx ? effectiveFontPx(l2cta.fontPx, spec.scene2, l2cta.fontBaseChars) : textSizeFor(spec.scene2)
   const estLines = Math.max(1, Math.ceil((spec.scene2.length * font2 * 0.55) / 960))
   const textBlockH = 60 + estLines * font2 * 1.2 // margin-top + wrapped lines
   const ctaImgH = spec.images?.outro2 ? 320 + 26 : set.outro2Asset ? 170 + 26 : 0
@@ -980,11 +1031,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
-      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1) : textSizeFor(spec.scene1)}px${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card1).txtTop}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1, layoutFor(card1).fontBaseChars) : textSizeFor(spec.scene1)}px${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card1).txtTop}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
       ${hero1Abs}
     </div>
     <div class="scene sc2" style="${sceneStyle(card2)}">
-      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card2).txtTop}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2, layoutFor(card2).fontBaseChars) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card2).txtTop}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
       ${spec.kind === 'intro' ? hero2Html : ctaHtml}
     </div>
   </div>
