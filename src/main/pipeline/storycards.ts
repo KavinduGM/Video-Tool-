@@ -832,6 +832,22 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // code-drawn fallback, placed exactly where the layout anchors them —
   // including bleeds off the frame edges (#stage clips them).
   const layoutFor = (card: CardKey): CardLayout => set.layouts?.[card] ?? DEFAULT_CARD_LAYOUTS[card]
+
+  // ---- SAFE-ZONE CLAMPS -------------------------------------------------
+  // Designer frames sometimes place elements outside the safe area (the
+  // designer doesn't know the zones). The measured layout values document
+  // the design; these clamps GUARANTEE every system-drawn overlay (badge,
+  // texts, pill, arrow) stays inside safe bounds — top ≥ the safe line,
+  // bottom clear of the caption zone — using the same conservative text
+  // estimate as the crop-proof arrow fit.
+  const SAFE_ZONE_H = 1380 // 1920 − 160 top − 380 caption margin
+  const estTextH = (l: CardLayout, text: string): number => {
+    const f = l.fontPx ? effectiveFontPx(l.fontPx, text, l.fontBaseChars) : textSizeFor(text)
+    const lines = Math.max(1, Math.ceil((text.length * f * 0.55) / 960))
+    return lines * f * 1.2
+  }
+  const clampTxtTop = (l: CardLayout, text: string): number =>
+    Math.round(Math.max(0, Math.min(l.txtTop ?? 0, SAFE_ZONE_H - estTextH(l, text))))
   const heroFor = (slot: 'intro1' | 'intro2' | 'outro1', box: HeroLayout): string => {
     const href = spec.images?.[slot]
     if (!href) return assetSvg(set.assets[slot], Math.round(Math.min(box.w ?? box.h, box.h) * 0.95))
@@ -910,7 +926,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // EXACTLY. Long CTA text ⇒ shorter arrow; short text ⇒ full-length arrow.
   // Text height uses a conservative wrap estimate (0.55em avg char width),
   // so the arrow can only ever err SMALLER — cropping is impossible.
-  const SAFE_H = 1380 // 1920 − 160 top − 380 caption margin
+  const SAFE_H = SAFE_ZONE_H
   const l2cta = layoutFor(card2)
   const font2 = l2cta.fontPx ? effectiveFontPx(l2cta.fontPx, spec.scene2, l2cta.fontBaseChars) : textSizeFor(spec.scene2)
   const estLines = Math.max(1, Math.ceil((spec.scene2.length * font2 * 0.55) / 960))
@@ -922,12 +938,26 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // Design-measured overrides: absolute pill/arrow positions and an exact
   // arrow height beat the flow-computed fit (the svg height arg compensates
   // the per-style render factor so layout.arrowH is the TRUE on-screen height).
-  const arrowHFinal = l2cta.arrowH ?? arrowH
+  // Safe-zone clamps for the CTA: the pill must end inside the safe area;
+  // the arrow (its full height + bob travel) must too — a design that runs
+  // into the caption zone gets a proportionally shorter arrow instead.
+  const pillHPx = (l2cta.pillFontPx ?? 38) * 1.16 + (l2cta.pillFontPx ? Math.round(l2cta.pillFontPx * 0.84) : 32)
+  const pillTopClamped =
+    l2cta.pillTop !== undefined ? Math.max(0, Math.min(l2cta.pillTop, SAFE_ZONE_H - Math.round(pillHPx))) : undefined
+  const ARROW_MIN = 200
+  const arrowTopClamped =
+    l2cta.arrowTop !== undefined
+      ? Math.max(0, Math.min(l2cta.arrowTop, SAFE_ZONE_H - 24 - ARROW_MIN))
+      : undefined
+  const arrowHFinal =
+    arrowTopClamped !== undefined
+      ? Math.max(ARROW_MIN, Math.min(l2cta.arrowH ?? arrowH, SAFE_ZONE_H - arrowTopClamped - 24))
+      : (l2cta.arrowH ?? arrowH)
   const arrowHeightArg =
     set.arrowStyle === 'block' ? arrowHFinal / 0.52 : set.arrowStyle === 'thin' ? arrowHFinal / 0.75 : arrowHFinal
   const absCenter = 'position:absolute;left:0;right:0;display:flex;justify-content:center;margin-top:0;'
-  const pillPosCss = l2cta.pillTop !== undefined ? `${absCenter}top:${l2cta.pillTop}px;` : ''
-  const arrowPosCss = l2cta.arrowTop !== undefined ? `${absCenter}top:${l2cta.arrowTop}px;` : ''
+  const pillPosCss = pillTopClamped !== undefined ? `${absCenter}top:${pillTopClamped}px;` : ''
+  const arrowPosCss = arrowTopClamped !== undefined ? `${absCenter}top:${arrowTopClamped}px;` : ''
   const ctaHtml = spec.subscribe
     ? `${ctaImgHtml}
       <div class="cta-pop" style="${pillPosCss}animation-delay:${pillDelay.toFixed(2)}s">${pillHtml(set, pulseDelay, l2cta.pillFontPx)}</div>
@@ -1031,11 +1061,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
-      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1, layoutFor(card1).fontBaseChars) : textSizeFor(spec.scene1)}px${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card1).txtTop}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1, layoutFor(card1).fontBaseChars) : textSizeFor(spec.scene1)}px${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card1), spec.scene1)}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
       ${hero1Abs}
     </div>
     <div class="scene sc2" style="${sceneStyle(card2)}">
-      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2, layoutFor(card2).fontBaseChars) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${layoutFor(card2).txtTop}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2, layoutFor(card2).fontBaseChars) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card2), spec.scene2)}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
       ${spec.kind === 'intro' ? hero2Html : ctaHtml}
     </div>
   </div>
