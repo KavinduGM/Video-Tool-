@@ -394,23 +394,69 @@ export const STORY_SETS: StorySet[] = [
   {
     id: 5,
     name: 'slate',
-    bg: '#C9D4DE',
+    bg: '#B4CBE3',
     ink: '#101010',
-    font: 'Oswald',
-    weights: '500;600;700',
+    font: 'Poppins',
+    weights: '600;700;800',
     caps: false,
     italic: false,
     spaced: false,
     align: 'left',
     badge: { bg: '#9FD8CE', ink: '#17342F' },
-    arrowStyle: 'block',
+    arrowStyle: 'curved',
     arrowColor: '#101010',
     pill: 'outline',
     underline2: true,
     assets: { intro1: 'magnifier', intro2: 'handshake', outro1: 'clipboard' },
     assetMode: 'image',
     svgFallbackOk: true,
-    imageSlots: STD_SLOTS
+    imageSlots: STD_SLOTS,
+    // Measured from the exact 1080×1920 Set-5 design frames (backdrop-first).
+    // Left-aligned Poppins on light periwinkle; mint badge centered at the
+    // safe top (font 96). intro1 title abs y≈368 @165/20ch (padLeft 35);
+    // intro2 UNDERLINED text at the safe top @165/34ch; outro1 abs y≈247
+    // @138/29ch. Outro2 centered: text abs y≈227 @108/41ch, outlined
+    // SUBSCRIBE pill abs y≈863 (font 72), black curved arrow abs y≈1277
+    // (design 500 — safe-zone clamp renders what fits).
+    layouts: {
+      intro1: {
+        padTop: 0,
+        badgeFontPx: 96,
+        badgeAlign: 'center',
+        txtTop: 208,
+        padLeft: 35,
+        fontPx: 165,
+        fontBaseChars: 20,
+        hero: { w: 700, h: 720, x: 'center', top: 940 }
+      },
+      intro2: {
+        padTop: 0,
+        txtTop: 0,
+        padLeft: 5,
+        fontPx: 165,
+        fontBaseChars: 34,
+        hero: { w: 1040, h: 820, x: 'center', top: 890 }
+      },
+      outro1: {
+        padTop: 0,
+        txtTop: 87,
+        padLeft: 35,
+        fontPx: 138,
+        fontBaseChars: 29,
+        hero: { w: 640, h: 900, x: 'center', top: 680 }
+      },
+      outro2: {
+        padTop: 0,
+        txtTop: 67,
+        textAlign: 'center',
+        fontPx: 108,
+        fontBaseChars: 41,
+        pillTop: 703,
+        pillFontPx: 72,
+        arrowTop: 1117,
+        arrowH: 500
+      }
+    }
   },
   {
     id: 6,
@@ -853,9 +899,10 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const italicCss = set.italic ? 'font-style:italic;' : ''
   const spacedCss = set.spaced ? 'letter-spacing:3px;' : ''
   const badgeSpacedCss = set.badge.spaced ? 'letter-spacing:4px;text-transform:uppercase;' : 'letter-spacing:2px;'
-  const underline2Css = set.underline2
-    ? '.sc2 .txt{text-decoration:underline;text-decoration-thickness:6px;text-underline-offset:12px}'
-    : ''
+  const underline2Css =
+    set.underline2 && spec.kind === 'intro'
+      ? '.sc2 .txt{text-decoration:underline;text-decoration-thickness:6px;text-underline-offset:12px}'
+      : ''
 
   // Oversized storyboard badges: per-card badgeFontPx scales the pill's font,
   // padding and radius together (the badge only appears on intro scene 1).
