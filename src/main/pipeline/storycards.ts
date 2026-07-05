@@ -749,10 +749,10 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   // feels alive: scene 1 zooms in gently, scene 2 settles back.
   const backdropHtml =
     (bg1
-      ? `<div class="bgwrap bgsc1" style="animation-delay:${exitDelay.toFixed(2)}s"><img class="bgimg" style="animation-duration:${(tSplit + 0.4).toFixed(2)}s" src="${bg1}" alt=""/></div>`
+      ? `<div class="bgwrap bgsc1" style="animation-delay:${exitDelay.toFixed(2)}s"><img class="bgimg" src="${bg1}" alt=""/></div>`
       : '') +
     (bg2
-      ? `<div class="bgwrap bgsc2" style="animation-delay:${tSplit.toFixed(2)}s"><img class="bgimg kb2" style="animation-delay:${tSplit.toFixed(2)}s;animation-duration:${Math.max(1, D - tSplit + 0.3).toFixed(2)}s" src="${bg2}" alt=""/></div>`
+      ? `<div class="bgwrap bgsc2" style="animation-delay:${tSplit.toFixed(2)}s"><img class="bgimg drift2" src="${bg2}" alt=""/></div>`
       : '')
 
   // Scene wrapper styles: per-card top padding + text alignment.
@@ -813,8 +813,8 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
   .bgwrap{position:absolute;inset:0;overflow:hidden}
-  .bgimg{width:1080px;height:1920px;object-fit:cover;animation-name:kb1;animation-timing-function:ease-in-out;animation-fill-mode:both;animation-iteration-count:1}
-  .kb2{animation-name:kb2}
+  .bgimg{width:1080px;height:1920px;object-fit:cover;animation:drift1 8s ease-in-out infinite}
+  .drift2{animation:drift2 9.5s ease-in-out infinite}
   .bgsc1{animation:bgOut .35s ease-in both;animation-iteration-count:1}
   .bgsc2{opacity:0;animation:bgIn .35s ease-out both;animation-iteration-count:1}
   .heroA{position:absolute;left:50%;transform:translateX(-50%)}
@@ -844,8 +844,21 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
   @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}
-  @keyframes kb1{from{transform:scale(1) translate(0,0)}to{transform:scale(1.06) translate(-10px,-8px)}}
-  @keyframes kb2{from{transform:scale(1.05) translate(8px,6px)}to{transform:scale(1) translate(0,0)}}
+  /* Handheld micro-drift: tiny irregular x/y movements with a breathing hint
+     of motion blur — no zoom. scale(1.02) overscans 21px so the ±6px travel
+     never exposes the frame edges. Different phase per scene. */
+  @keyframes drift1{
+    0%,100%{transform:scale(1.02) translate(0,0);filter:blur(0)}
+    22%{transform:scale(1.02) translate(-6px,4px);filter:blur(0.6px)}
+    48%{transform:scale(1.02) translate(5px,-5px);filter:blur(0.35px)}
+    74%{transform:scale(1.02) translate(-3px,-6px);filter:blur(0.6px)}
+  }
+  @keyframes drift2{
+    0%,100%{transform:scale(1.02) translate(0,0);filter:blur(0)}
+    26%{transform:scale(1.02) translate(5px,5px);filter:blur(0.6px)}
+    52%{transform:scale(1.02) translate(-6px,3px);filter:blur(0.35px)}
+    78%{transform:scale(1.02) translate(4px,-5px);filter:blur(0.6px)}
+  }
   @keyframes bgOut{from{opacity:1}to{opacity:0}}
   @keyframes bgIn{from{opacity:0}to{opacity:1}}
 </style>
