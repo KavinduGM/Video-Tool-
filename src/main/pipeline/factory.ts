@@ -157,6 +157,40 @@ HARD RULES for every scene explainer:
 
 VOICEOVERS: conversational exam-coach tone, drawn from the concept text (its trap, signal words, contrasts). Scene voiceovers 50–110 words each; total video ≈ 60–90 seconds. Never read display lines word-for-word — the text is the skeleton, the voice adds the story. Spell out numbers where natural.
 
+EXACT YAML SHAPE — the parser is STRICT. Use ONLY these keys, nowhere else, no extras (no id, no name, no title, no notes — an unknown key REJECTS the whole script):
+
+video_name: …
+ratio: "9:16"
+output_folder: …
+voice_profile: …
+voice_speed: 1.0
+background_music: "…"
+template_set: …
+channel: "…"
+colors: [5 items]
+fonts: [3 items]
+description: |
+  …
+intro:
+  voiceover: |
+    …
+  scene1: "…"
+  scene2: "…"
+outro:
+  voiceover: |
+    …
+  scene1: "…"
+  scene2: "…"
+  subscribe: true        # REQUIRED — never omit
+scenes:                  # each scene has EXACTLY these 3 keys:
+  - explainer: |
+      …
+    voiceover: |
+      …
+    transition_out:
+      type: fade
+      duration: 0.5
+
 Output the complete YAML now.`
 }
 
@@ -165,16 +199,18 @@ Output the complete YAML now.`
 // ---------------------------------------------------------------------
 
 export async function generateScript(
-  args: { apiKey: string; model: string; prompt: string; feedback?: string },
+  args: { apiKey: string; model: string; prompt: string; feedback?: string; previousYaml?: string },
   onStage?: (s: string) => void
 ): Promise<string> {
   const client = new Anthropic({ apiKey: args.apiKey })
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: args.prompt }]
-  if (args.feedback) {
-    messages.push({ role: 'assistant', content: '(previous attempt)' })
+  if (args.feedback && args.previousYaml) {
+    // The model must SEE its previous attempt — otherwise it regenerates from
+    // scratch and repeats the same structural habits the errors point at.
+    messages.push({ role: 'assistant', content: args.previousYaml })
     messages.push({
       role: 'user',
-      content: `Your previous script failed verification with these EXACT problems — fix every one and output the corrected COMPLETE YAML only:\n${args.feedback}`
+      content: `That script failed verification with these EXACT problems — fix every one (change nothing else) and output the corrected COMPLETE YAML only:\n${args.feedback}`
     })
   }
   onStage?.('generating')

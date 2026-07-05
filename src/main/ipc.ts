@@ -594,7 +594,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
               apiKey: settings.anthropic_api_key,
               model: settings.claude_model,
               prompt,
-              feedback: lastErrors.length ? lastErrors.join('\n') : undefined
+              feedback: lastErrors.length ? lastErrors.join('\n') : undefined,
+              previousYaml: lastErrors.length && yaml ? yaml : undefined
             })
             const v = validateGeneratedScript(yaml, expect)
             lastErrors = v.errors
@@ -627,7 +628,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
               apiKey: settings.anthropic_api_key,
               model: settings.claude_model,
               prompt,
-              feedback: review.issues.join('\n')
+              feedback: review.issues.join('\n'),
+              previousYaml: yaml
             })
             const v2 = validateGeneratedScript(yaml2, expect)
             if (v2.errors.length === 0) {
