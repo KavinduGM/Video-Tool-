@@ -27,7 +27,7 @@ import { parseScript } from './pipeline/parser'
 import { ttsHealth, listVoices } from './pipeline/tts'
 import { extractScriptsFromDocument, sniffVideoName } from './pipeline/document'
 import { templateCount, clearTemplates } from './pipeline/templates'
-import { pickStorySet, STORY_SETS } from './pipeline/storycards'
+import { pickStorySet, STORY_SETS, setsForChannel, templateAssetDir } from './pipeline/storycards'
 import { buildStoryIntroOutroCard } from './pipeline/claude'
 import { scaffoldProject, renderHyperframes } from './pipeline/hyperframes'
 import { generateAudioWithTimestamps } from './pipeline/tts'
@@ -355,7 +355,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           const copies: { src: string; name: string; trim: boolean }[] = []
           const missing: string[] = []
           if (storySet.assetMode === 'image') {
-            const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+            const assetDir = templateAssetDir(spec.channel, storySet.id)
             const slots = storySet.imageSlots!
             const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
               part === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']
@@ -380,7 +380,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
         // A set has REAL uploaded designs when its bg triple or hero triple exists.
         const hasRealUploads = (storySet: (typeof STORY_SETS)[number]): boolean => {
-          const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+          const dir = templateAssetDir(spec.channel, storySet.id)
           const slots = storySet.imageSlots!
           const heroes = ['intro1', 'intro2', 'outro1'].every((k) =>
             fs.existsSync(path.join(dir, slots[k as 'intro1' | 'intro2' | 'outro1']))
@@ -447,13 +447,14 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           const aOutro = await prepAudio('outro')
           const rendered: number[] = []
           const skipped: string[] = []
-          for (const st of STORY_SETS) {
+          const channelSets = setsForChannel(spec.channel)
+          for (const st of channelSets) {
             if (!hasRealUploads(st)) {
               skipped.push(`set ${st.id} (${st.name})`)
               continue
             }
             const nn = String(st.id).padStart(2, '0')
-            send(`Preview ALL: set ${st.id} "${st.name}" — rendering intro (${rendered.length * 2 + 1}/${STORY_SETS.length * 2} max)…`)
+            send(`Preview ALL: set ${st.id} "${st.name}" — rendering intro (${rendered.length * 2 + 1}/${channelSets.length * 2} max)…`)
             await renderCard(st, 'intro', aIntro, `set-${nn}-intro`)
             send(`Preview ALL: set ${st.id} "${st.name}" — rendering outro…`)
             await renderCard(st, 'outro', aOutro, `set-${nn}-outro`)
@@ -470,10 +471,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
         // ---------------- SINGLE PART: picked set, as before ----------------
         const a = await prepAudio(args.part)
-        const availableImageSets = STORY_SETS.filter((st) => st.assetMode === 'image')
+        const availableImageSets = setsForChannel(spec.channel)
+          .filter((st) => st.assetMode === 'image')
           .filter(hasRealUploads)
           .map((st) => st.id)
-        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
+        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets, spec.channel)
         send(`Preview ${args.part}: rendering the card with Hyperframes (set ${storySet.id} "${storySet.name}", ${a.durationSeconds.toFixed(1)}s — takes ~30–60s)…`)
         const finalOut = await renderCard(storySet, args.part, a, `${args.part}_set${storySet.id}_preview`)
         shell.showItemInFolder(finalOut)
@@ -540,8 +542,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         // restarting per document — but only across sets whose design files
         // are actually uploaded (a forced set with missing files would lose
         // its design). With all 10 uploaded this is the exact 1..10 mapping.
-        const uploadedSets = STORY_SETS.filter((st) => {
-          const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${st.id}`)
+        const uploadedSets = setsForChannel(args.channel).filter((st) => {
+          const dir = templateAssetDir(args.channel, st.id)
           const slots = st.imageSlots!
           const req: ('intro1' | 'intro2' | 'outro1')[] = ['intro1', 'intro2', 'outro1']
           const heroes = req.every((k) => fs.existsSync(path.join(dir, slots[k])))

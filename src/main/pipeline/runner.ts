@@ -13,7 +13,7 @@ import {
   buildStoryIntroOutroCard,
   injectCalmReveal
 } from './claude'
-import { pickStorySet, STORY_SETS } from './storycards'
+import { pickStorySet, setsForChannel, templateAssetDir } from './storycards'
 import { computeSceneFeatures, saveTemplate, findBestTemplate } from './templates'
 import { generateAudioWithTimestamps, type WordTiming } from './tts'
 import { mergeExamTokens, buildAss } from './captions'
@@ -394,9 +394,10 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
       try {
         // Image sets join the auto-pick rotation only when ALL their PNGs are
         // present, so a missing asset can never break an auto-picked video.
-        const availableImageSets = STORY_SETS.filter((s) => s.assetMode === 'image')
+        const availableImageSets = setsForChannel(spec.channel)
+          .filter((s) => s.assetMode === 'image')
           .filter((s) => {
-            const dir = path.join(getStoragePaths().userData, 'template-assets', `set-${s.id}`)
+            const dir = templateAssetDir(spec.channel, s.id)
             const slots = s.imageSlots!
             const heroes =
               fs.existsSync(path.join(dir, slots.intro1)) &&
@@ -409,7 +410,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
             return heroes || bgs
           })
           .map((s) => s.id)
-        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
+        const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets, spec.channel)
         cb.onProgress(baseProgress + segShare * 0.35, `${seg.label}: composing story template card`)
         cb.onLog(info(`${seg.label}: composing 2-scene story template card (set ${storySet.id} "${storySet.name}"${spec.exam_name || spec.channel ? `, badge "${spec.exam_name || spec.channel}"` : ''}${seg.subscribe ? ', subscribe CTA' : ''}) — deterministic, review skipped`))
 
@@ -421,7 +422,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
         let backdrops: Partial<Record<'intro1' | 'intro2' | 'outro1' | 'outro2', string>> | undefined
         const assetCopies: { src: string; name: string; trim: boolean }[] = []
         if (storySet.assetMode === 'image') {
-          const assetDir = path.join(getStoragePaths().userData, 'template-assets', `set-${storySet.id}`)
+          const assetDir = templateAssetDir(spec.channel, storySet.id)
           const slots = storySet.imageSlots!
           const needed: ('intro1' | 'intro2' | 'outro1' | 'outro2')[] =
             seg.mode === 'intro' ? ['intro1', 'intro2'] : ['outro1', 'outro2']

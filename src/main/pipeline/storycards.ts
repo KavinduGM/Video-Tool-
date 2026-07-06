@@ -1,7 +1,10 @@
 // =====================================================================
 // STORY TEMPLATE CARDS — 2-scene intro / 2-scene outro (storyboard style)
 // =====================================================================
-// The State Exams Prep template pack (10 sets). PRODUCTION MODEL, settled
+// STORY_SETS below is the State Exams Prep template pack (10 sets). Each
+// CHANNEL has its OWN pack of 10 sets (own layouts/designs); see
+// STORY_SET_PACKS + setsForChannel + templateAssetDir near the bottom.
+// PRODUCTION MODEL, settled
 // while fine-tuning Set 3:
 //
 //   1. BACKDROP-FIRST: the designer exports each card's full 1080×1920
@@ -23,7 +26,10 @@
 // deterministically — no AI, byte-identical output for the same input.
 // =====================================================================
 
+import fs from 'node:fs'
+import path from 'node:path'
 import { NINE_SIXTEEN } from '@shared/zones'
+import { getStoragePaths } from '../settings'
 
 export type AssetId =
   | 'house'
@@ -776,6 +782,47 @@ export const STORY_SETS: StorySet[] = [
   }
 ]
 
+// =====================================================================
+// CHANNEL PACKS — every channel has its own 10 sets. Only State Exams Prep
+// is measured today; other channels fall back to it as a stand-in (their own
+// asset folders are empty, so they render the svg-drawn versions) until their
+// design frames arrive and get a measuring pass. Scripts already carry
+// `channel:`, so routing is automatic — no per-video wiring.
+// =====================================================================
+
+/** Stable folder-safe slug for a channel display name. */
+export function channelSlug(channel?: string): string {
+  return (channel || 'State Exams Prep')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+export const STORY_SET_PACKS: Record<string, StorySet[]> = {
+  [channelSlug('State Exams Prep')]: STORY_SETS
+}
+
+/** The 10 sets for a channel. Un-coded channels fall back to the State Exams
+ *  pack so a job still renders (its own folder empty → svg stand-ins). */
+export function setsForChannel(channel?: string): StorySet[] {
+  return STORY_SET_PACKS[channelSlug(channel)] ?? STORY_SETS
+}
+
+/** On-disk folder for one channel's set assets. New uploads live in
+ *  template-assets/<channel-slug>/set-<N>/. The original State Exams Prep
+ *  uploads predate channel folders and live flat in template-assets/set-<N>/;
+ *  keep resolving those so nothing must be re-uploaded. */
+export function templateAssetDir(channel: string | undefined, setId: number): string {
+  const base = path.join(getStoragePaths().userData, 'template-assets')
+  const scoped = path.join(base, channelSlug(channel), `set-${setId}`)
+  if (fs.existsSync(scoped)) return scoped
+  if (channelSlug(channel) === channelSlug('State Exams Prep')) {
+    const legacy = path.join(base, `set-${setId}`)
+    if (fs.existsSync(legacy)) return legacy
+  }
+  return scoped
+}
+
 function hash(s: string): number {
   let h = 2166136261
   for (let i = 0; i < s.length; i++) {
@@ -793,13 +840,19 @@ function hash(s: string): number {
  * svgFallbackOk stand-ins so a job still completes. Explicit template_set
  * overrides everything.
  */
-export function pickStorySet(seed: string, override?: number, availableImageSets: number[] = []): StorySet {
+export function pickStorySet(
+  seed: string,
+  override?: number,
+  availableImageSets: number[] = [],
+  channel?: string
+): StorySet {
+  const sets = setsForChannel(channel)
   if (override && override >= 1) {
-    return STORY_SETS[(override - 1) % STORY_SETS.length]
+    return sets[(override - 1) % sets.length]
   }
-  let pool = STORY_SETS.filter((s) => availableImageSets.includes(s.id))
-  if (pool.length === 0) pool = STORY_SETS.filter((s) => s.svgFallbackOk)
-  if (pool.length === 0) pool = STORY_SETS
+  let pool = sets.filter((s) => availableImageSets.includes(s.id))
+  if (pool.length === 0) pool = sets.filter((s) => s.svgFallbackOk)
+  if (pool.length === 0) pool = sets
   return pool[hash(`story:${seed}`) % pool.length]
 }
 
