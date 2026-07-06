@@ -1729,7 +1729,21 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
 
   // Oversized storyboard badges: per-card badgeFontPx scales the pill's font,
   // padding and radius together (the badge only appears on intro scene 1).
-  const badgeFontPx = set.layouts?.intro1?.badgeFontPx
+  // The badge NEVER wraps (white-space:nowrap) and uses a fixed design font,
+  // so a long exam name (the chip now shows exam_name, e.g. "NJ Real Estate
+  // Exam") would run off the frame and crop. Shrink the font so the chip
+  // (glyphs + horizontal padding) fits the safe width — long names scale
+  // down, short names keep the measured design size. Mirrors effectiveFontPx
+  // for scene text (estimation-based; the story card isn't DOM-measured).
+  const SAFE_W = NINE_SIXTEEN.width - m.left - m.right
+  const fitBadgeFont = (raw: number): number => {
+    if (!spec.badge) return raw
+    const estW = spec.badge.length * 0.6 * raw + raw // ~0.6em/glyph + 0.5em pad each side
+    const maxW = SAFE_W - 40
+    return estW > maxW ? Math.max(24, Math.floor((raw * maxW) / estW)) : raw
+  }
+  const rawBadgeFontPx = set.layouts?.intro1?.badgeFontPx
+  const badgeFontPx = rawBadgeFontPx ? fitBadgeFont(rawBadgeFontPx) : rawBadgeFontPx
   const badgeSizeCss = badgeFontPx
     ? `font-size:${badgeFontPx}px;padding:${Math.round(badgeFontPx * 0.3)}px ${Math.round(badgeFontPx * 0.5)}px;border-radius:${Math.round(badgeFontPx * 0.44)}px;`
     : ''
