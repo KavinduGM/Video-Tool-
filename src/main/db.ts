@@ -136,7 +136,9 @@ export function nextQueuedJob(): Job | null {
 
 export function updateJob(
   id: string,
-  patch: Partial<Pick<Job, 'status' | 'progress' | 'current_step' | 'error' | 'output_path'>>
+  patch: Partial<
+    Pick<Job, 'status' | 'progress' | 'current_step' | 'error' | 'output_path' | 'script_yaml' | 'video_name'>
+  >
 ): Job | null {
   const db = init()
   const idx = db.jobs.findIndex((j) => j.id === id)

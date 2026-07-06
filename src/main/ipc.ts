@@ -656,10 +656,14 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
             send(`Factory ${i + 1}/${use.length}: ${videoName} needs YOUR review (Queue tab) — reviewer doubts: ${review.issues[0] ?? ''}`)
             continue
           }
-          // Verified → queue for rendering.
+          // Verified → queue for rendering. Wake the worker NOW so rendering
+          // starts with the first verified script and runs in parallel with the
+          // rest of the generation — a later concept parked for manual review
+          // must never hold up videos for scripts that already passed.
           const job = createJob({ video_name: videoName, script_yaml: yaml })
           broadcast({ type: 'created', job })
           queued.push(videoName)
+          worker.wake()
           send(`Factory ${i + 1}/${use.length}: ✓ verified and queued ${videoName}.`)
           } catch (err: any) {
             failed.push(videoName)
