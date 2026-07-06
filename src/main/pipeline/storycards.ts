@@ -941,15 +941,16 @@ const OA_GUIDES_SETS: StorySet[] = [
     assetMode: 'image',
     imageSlots: STD_SLOTS,
     layouts: {
-      // Black exam-badge at top; serif hook above the head silhouette (baked
-      // into the backdrop); the punch word highlights red.
+      // Revised frame: clean empty top; the head silhouette with "simplified."
+      // (red) baked into its brain sits in the lower half. Badge at the very
+      // top, serif hook centered in the empty upper area, well above the head.
       intro1: {
         padTop: 0,
-        txtTop: 260,
+        txtTop: 230,
         fontPx: 116,
         fontBaseChars: 26,
         textAlign: 'center',
-        badgeTop: 30,
+        badgeTop: 40,
         badgeFontPx: 76,
         badgeAlign: 'center'
       },
