@@ -172,8 +172,7 @@ export function deleteJob(id: string): void {
 
 export function resetJob(id: string): Job | null {
   return updateJob(id, {
-    status: input.status ?? 'queued',
-    error: input.error,
+    status: 'queued',
     progress: 0,
     current_step: undefined,
     error: undefined,
