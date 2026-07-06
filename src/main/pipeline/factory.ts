@@ -6,7 +6,8 @@
 // For each concept section, Claude writes a complete YAML script using
 // the master guide prompt below (which encodes every rule the system
 // has accumulated: 3-scene pattern, whole-line display quotes, filled
-// stars, 2-scene intro/outro with the exam name FIRST, universal outro,
+// stars, 2-scene intro/outro (the badge chip carries the exam name and
+// scene1 is a pure hook that never repeats it), universal outro,
 // music rotation, varied palettes). Every generated script then passes
 // a strict DETERMINISTIC validator plus a Claude review before it is
 // allowed anywhere near the render queue — an unverified script never
@@ -52,25 +53,28 @@ export const FACTORY_PALETTES: { bg: string; accent: string; emph: string; warn:
 // name is swapped per exam; these are inspiration, never copied blindly)
 // ---------------------------------------------------------------------
 
+// The badge chip above intro scene1 already shows the exam name, so every
+// scene1 hook below stands ALONE as a full natural line — never a stub left
+// over after removing the exam name.
 const HOOK_EXAMPLES = `
 1) VO: "{EXAM}, one wrong answer can cost you. Here's what most students miss on day one."
-   scene1: "{EXAM}, most students miss this." scene2: "Don't be one of them."
+   scene1: "Most students miss this on day one." scene2: "Don't be one of them."
    OUTRO VO: "Now you know what others don't. Watch the full video, link in description."
    outro scene1: "Edge gained." scene2: "Watch the full video, link in description."
 2) VO: "{EXAM}, your OA is closer than you think. But only if you nail this concept first."
-   scene1: "{EXAM}, this concept is worth marks." scene2: "Watch before your exam."
+   scene1: "This one concept is worth easy marks." scene2: "Watch before your exam."
    OUTRO VO: "That's one concept locked in. Watch the full video, link in description."
    outro scene1: "Concept: locked." scene2: "Watch the full video, link in description."
 3) VO: "{EXAM} prep doesn't have to be overwhelming. Let's cut through the noise, right here, right now."
-   scene1: "{EXAM}, simplified." scene2: "Less confusion. More clarity. Let's go."
+   scene1: "One confusing topic, made simple." scene2: "Less confusion. More clarity. Let's go."
    OUTRO VO: "Less stress, more confidence. Watch the full video, link in description."
    outro scene1: "Clarity achieved." scene2: "Watch the full video, link in description."
 4) VO: "{EXAM} students, stop guessing. This 60-second breakdown changes how you answer this question."
-   scene1: "{EXAM}, stop guessing. Start knowing." scene2: "60 seconds. Real results."
+   scene1: "Stop guessing on this question." scene2: "60 seconds. Real results."
    OUTRO VO: "No more guessing on that one. Watch the full video, link in description."
    outro scene1: "Guesswork: eliminated." scene2: "Watch the full video, link in description."
 5) VO: "{EXAM} is a test of application, not memorization. Here's how to think through this topic."
-   scene1: "{EXAM}, don't memorize. Understand." scene2: "Here's the difference."
+   scene1: "Don't memorize this. Understand it." scene2: "Here's the difference."
    OUTRO VO: "That's how you apply it, not just recall it. Watch the full video, link in description."
    outro scene1: "Understanding over memorizing." scene2: "Watch the full video, link in description."
 `
@@ -80,8 +84,8 @@ const HOOK_EXAMPLES = `
 // ---------------------------------------------------------------------
 
 export interface GenerationTarget {
-  examName: string // display name, e.g. "WGU C310 OA" — ALWAYS first in intro scene1
-  channel: string // badge text, e.g. "OA Practice"
+  examName: string // display name, e.g. "WGU C310 OA" — shown as the badge chip; never in scene1 text
+  channel: string // channel name (script metadata only — the badge shows examName)
   videoName: string // exact video_name the script MUST use
   outputFolder: string
   voiceProfile: string
@@ -133,9 +137,9 @@ description: |
 INTRO (2 scenes — the system renders scene1 then scene2):
 - The system shows a highlighted badge chip with "${t.examName}" ABOVE scene1 automatically — so scene1 must NOT contain the exam name (it would double up).
 - voiceover: 1–2 punchy sentences, 15–40 words, MUST include "${t.examName}".
-- scene1: a short punchy hook WITHOUT the exam name (max ~45 characters), e.g. "Most students miss this."
+- scene1: a punchy hook WITHOUT the exam name — a FULL natural line of 4-8 words (15-45 characters), never a leftover stub. "Most miss this." is TOO SHORT next to the badge; pad it into a complete thought like "Most miss this on day one."
 - scene2: a short momentum line (max ~45 characters).
-Style inspiration (the {EXAM} prefix in these examples is now carried by the badge — output only the hook part; write your OWN variant that fits this concept):
+Style inspiration ({EXAM} appears only in voiceovers — the on-screen badge carries the exam name, so the scene1 hooks stand alone; write your OWN variant that fits this concept):
 ${HOOK_EXAMPLES}
 
 OUTRO (2 scenes — UNIVERSAL, must NOT mention the exam name anywhere):
@@ -271,13 +275,24 @@ export function validateGeneratedScript(yaml: string, expect: FactoryExpectation
   if (expect.templateSet && spec.template_set !== expect.templateSet)
     errors.push(`template_set must be ${expect.templateSet}`)
 
-  // Intro: exam name FIRST, 2 short scene texts.
+  // Intro: pure-hook scene texts — the badge chip carries the exam name.
   if (!spec.intro) errors.push('intro section is missing')
   else {
     if (!spec.intro.scene1 || !spec.intro.scene2) errors.push('intro needs BOTH scene1 and scene2')
-    if (spec.intro.scene1 && spec.intro.scene1.toLowerCase().includes(exam))
-      errors.push('intro scene1 must NOT contain the exam name — the badge chip above it already shows it; use a pure hook line')
+    // Word-boundary match so short exam names (e.g. "GED") don't false-match
+    // inside ordinary words ("dodged").
+    const examRe = new RegExp(`\\b${expect.examName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    for (const [part, txt] of [['scene1', spec.intro.scene1], ['scene2', spec.intro.scene2]] as const)
+      if (txt && examRe.test(txt))
+        errors.push(`intro ${part} must NOT contain the exam name — the badge chip above scene1 already shows it; use a pure hook line`)
     if (spec.intro.scene1 && spec.intro.scene1.length > 60) errors.push('intro scene1 too long (max 60 chars)')
+    if (spec.intro.scene1) {
+      const hookWords = spec.intro.scene1.trim().split(/\s+/).length
+      if (hookWords < 4 || spec.intro.scene1.trim().length < 15)
+        errors.push(
+          'intro scene1 hook too short — the badge already shows the exam name, so the hook must be a full natural line of 4-8 words, e.g. "Most miss this on day one."'
+        )
+    }
     if (spec.intro.scene2 && spec.intro.scene2.length > 60) errors.push('intro scene2 too long (max 60 chars)')
     if (!spec.intro.voiceover.toLowerCase().includes(exam)) errors.push('intro voiceover must mention the exam name')
     const w = words(spec.intro.voiceover)
@@ -343,7 +358,7 @@ export async function reviewScriptWithClaude(args: {
 FAIL it if ANY of these hold:
 - The teaching content contradicts or misrepresents the CONCEPT text.
 - Scene voiceovers don't teach the concept's trap / signal words / contrast (generic filler).
-- The intro does not lead with "${args.examName}", or the outro mentions the exam name.
+- The intro scene1/scene2 on-screen text contains "${args.examName}" (a highlighted badge chip above scene1 ALREADY displays the exam name on the video, so on-screen text must never repeat it), or the intro voiceover never says "${args.examName}", or the outro mentions the exam name.
 - Display lines (quoted lines in explainers) are redundant with each other, cut mid-thought, or would confuse a viewer.
 - A scene explainer asks for looping/pulsing animation, an outlined (non-filled) star, circles as text containers, or content outside the safe area / in the caption zone.
 - The voiceover reads the on-screen lines verbatim instead of adding the story.

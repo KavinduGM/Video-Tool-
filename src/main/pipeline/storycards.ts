@@ -1046,7 +1046,7 @@ export interface StoryCardSpec {
   kind: 'intro' | 'outro'
   scene1: string
   scene2: string
-  /** channel name shown in the badge chip (intro scene 1 only) */
+  /** exam display name (falls back to channel for old scripts) shown in the badge chip (intro scene 1 only) */
   badge?: string
   subscribe?: boolean
   durationSeconds: number

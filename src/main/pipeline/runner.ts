@@ -411,7 +411,7 @@ export async function runJob(job: Job, cb: RunnerCallbacks, handle: { cancelled:
           .map((s) => s.id)
         const storySet = pickStorySet(spec.video_name, spec.template_set, availableImageSets)
         cb.onProgress(baseProgress + segShare * 0.35, `${seg.label}: composing story template card`)
-        cb.onLog(info(`${seg.label}: composing 2-scene story template card (set ${storySet.id} "${storySet.name}"${spec.channel ? `, badge "${spec.channel}"` : ''}${seg.subscribe ? ', subscribe CTA' : ''}) — deterministic, review skipped`))
+        cb.onLog(info(`${seg.label}: composing 2-scene story template card (set ${storySet.id} "${storySet.name}"${spec.exam_name || spec.channel ? `, badge "${spec.exam_name || spec.channel}"` : ''}${seg.subscribe ? ', subscribe CTA' : ''}) — deterministic, review skipped`))
 
         // ALL sets are PNG-first: use each uploaded slot PNG when present. A
         // missing REQUIRED slot falls back to the set's code-drawn art when
