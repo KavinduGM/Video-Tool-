@@ -1144,7 +1144,8 @@ const OA_GUIDES_SETS: StorySet[] = [
     assetMode: 'image',
     imageSlots: STD_SLOTS,
     layouts: {
-      // Red exam-badge at top; hook LOW (doodles fill the upper backdrop).
+      // Red exam-badge at top (system-drawn — the backdrop no longer bakes it
+      // in); hook LOW (doodles fill the upper backdrop).
       intro1: {
         padTop: 0,
         txtTop: 860,
@@ -1152,7 +1153,7 @@ const OA_GUIDES_SETS: StorySet[] = [
         fontBaseChars: 26,
         textAlign: 'center',
         badgeTop: 10,
-        badgeFontPx: 66,
+        badgeFontPx: 74,
         badgeAlign: 'center'
       },
       // Text upper-middle, torn-newspaper scrap in the lower backdrop.
