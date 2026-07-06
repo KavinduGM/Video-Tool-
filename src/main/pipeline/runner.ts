@@ -25,6 +25,7 @@ import {
   burnSubtitles,
   buildWipeTransitionClip,
   verifyTransitionClip,
+  MUSIC_VOLUME,
   pickTransitionStyle,
   trimPngAlpha,
   WIPE_TRANSITION_SECONDS,
@@ -48,8 +49,6 @@ const SCENE_TAIL_SECONDS = 1.0
 // Short tail for segments a wipe transition rides over — the 0.3s entry
 // crossfade starts almost immediately after the voice ends.
 const WIPE_ENTRY_TAIL_SECONDS = 0.35
-// Background music level under the intro/outro.
-const MUSIC_VOLUME = 0.1
 const FADE: Transition = { type: 'fade', duration: 0.5 }
 
 // Full-frame design backgrounds (storyboard exported WITHOUT texts). When a

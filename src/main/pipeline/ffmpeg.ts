@@ -132,6 +132,11 @@ export async function muxAudioWithVideo(args: MuxArgs, onLog?: (l: string) => vo
   )
 }
 
+// Background-music bed under intro/outro voiceovers. The user judged 10%
+// nearly inaudible under the voice — 20% is the level that reads as "music
+// present" without fighting the narration.
+export const MUSIC_VOLUME = 0.2
+
 /**
  * Mix a voiceover with a background-music bed. The voice stays at full volume
  * (normalize=0 so amix does NOT attenuate it) and the music is dropped to

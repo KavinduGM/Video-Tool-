@@ -31,7 +31,7 @@ import { pickStorySet, STORY_SETS } from './pipeline/storycards'
 import { buildStoryIntroOutroCard } from './pipeline/claude'
 import { scaffoldProject, renderHyperframes } from './pipeline/hyperframes'
 import { generateAudioWithTimestamps } from './pipeline/tts'
-import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitles, trimPngAlpha } from './pipeline/ffmpeg'
+import { probeDurationSeconds, mixVoiceWithMusic, muxAudioWithVideo, burnSubtitles, trimPngAlpha, MUSIC_VOLUME } from './pipeline/ffmpeg'
 import { mergeExamTokens, buildAss } from './pipeline/captions'
 import { findProfileByName, findMusicByName } from './settings'
 import {
@@ -339,7 +339,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           if (musicPath && fs.existsSync(musicPath)) {
             try {
               const mixed = path.join(previewDir, `audio-${part}-mixed.mp3`)
-              await mixVoiceWithMusic({ voiceIn: audioPath, musicIn: musicPath, out: mixed, musicVolume: 0.1, durationSeconds })
+              await mixVoiceWithMusic({ voiceIn: audioPath, musicIn: musicPath, out: mixed, musicVolume: MUSIC_VOLUME, durationSeconds })
               audioForMux = mixed
             } catch {
               /* keep plain voiceover */
