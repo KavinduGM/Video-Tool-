@@ -6,10 +6,6 @@ import { zoneGuideForPrompt, zoneGuideForReviewer, NINE_SIXTEEN } from '@shared/
 import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback, emptyShapeFeedback } from './safezone'
 import { SAFE_AREA } from '@shared/zones'
 
-// A measured 9:16 scene whose content box spans less than this fraction of the
-// safe-area height reads as sparse/cheap (a small cluster floating in darkness)
-// — the user rejects these frames, so the gate regenerates with scale-up feedback.
-const MIN_VERTICAL_FILL = 0.62
 import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
 import { buildAnimatedCardHtml } from './cards'
 import { buildStoryCardHtml, type StorySet } from './storycards'
@@ -210,7 +206,6 @@ Hard requirements you MUST follow:
         #stage {
           display: flex;
           flex-direction: column;
-          justify-content: space-between; /* CRITICAL: spread regions top->bottom */
           width: 100%;
           height: 100%;
           padding: 80px 60px;  /* breathing room around the edges */
@@ -221,12 +216,6 @@ Hard requirements you MUST follow:
         .region-top    { /* heading + underline */ }
         .region-body   { flex: 1; display: flex; ... ; gap: 24px; }
         .region-bottom { /* annotations / footer */ }
-
-    FILL THE FRAME: with justify-content:space-between the top region hugs the
-    top edge and the bottom region hugs the bottom edge, so the composition
-    fills the WHOLE height. Never leave the content as a small cluster in the
-    center with large empty bands above and below — that reads as cheap. Make
-    the text large and let the body region (flex:1) carry the main visual.
 
     HARD RULES for layout:
 
@@ -1115,9 +1104,8 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
         const safeH = SAFE_AREA.bottom - SAFE_AREA.top
         const contentH = measurement.content ? measurement.content.maxY - measurement.content.minY : safeH
         const fillFrac = contentH / safeH
-        const sparse = fillFrac < MIN_VERTICAL_FILL
 
-        if (!edgeOverflow && overlaps.length === 0 && empties.length === 0 && !sparse) {
+        if (!edgeOverflow && overlaps.length === 0 && empties.length === 0) {
           const c = measurement.content!
           log.push(
             `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], fills ${Math.round(fillFrac * 100)}% of safe height, no shape overlaps, no empty shapes)`
@@ -1131,10 +1119,6 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           if (edgeOverflow) reasons.push(safeZoneFeedback(measurement))
           if (overlaps.length > 0) reasons.push(overlapFeedback(overlaps))
           if (empties.length > 0) reasons.push(emptyShapeFeedback(empties))
-          if (sparse && !edgeOverflow)
-            reasons.push(
-              `LAYOUT TOO SPARSE: the content block spans only ${Math.round(contentH)}px of the ${Math.round(safeH)}px-tall safe area (${Math.round(fillFrac * 100)}% — it must fill at least ${Math.round(MIN_VERTICAL_FILL * 100)}%, aim for ~75%). The frame reads as mostly empty bands above and below a small centered cluster. Keep the SAME text content but SCALE THE COMPOSITION UP: increase every font-size and the vertical gaps between blocks until the first element sits near the top of the safe area and the last near its bottom. Do NOT add new content, do NOT break words across lines, do NOT exceed the safe area.`
-            )
           lastReason = reasons.join('\n\n')
           lastHtml = cleanHtml
           const bits: string[] = []
@@ -1149,7 +1133,6 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           }
           if (overlaps.length > 0) bits.push(`${overlaps.length} text-on-outline overlap(s)`)
           if (empties.length > 0) bits.push(`${empties.length} empty shape(s)`)
-          if (sparse && !edgeOverflow) bits.push(`sparse layout (${Math.round(fillFrac * 100)}% of safe height)`)
           log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${bits.join(', ')}) — regenerating with exact feedback`)
           continue
         }
@@ -1176,21 +1159,6 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
         if (empties.length > 0) {
           log.push(
             `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — ${empties.length} empty shape(s) remain after ${MAX_ATTEMPTS} attempts (a box rendered with no text inside). Consider using plain text instead of a box for this scene.`
-          )
-        }
-        if (sparse && !edgeOverflow) {
-          // Deterministic fill: repairs couldn't fill the frame, so force the
-          // content column to spread top-to-bottom (analogous to force-fit for
-          // overflow). Guarantees the frame is filled rather than shipping a
-          // small centered cluster with empty bands.
-          outHtml = injectFillSpread(outHtml)
-          if (sz === 'ok') sz = 'force-fitted'
-          log.push(
-            `attempt ${attempt}/${MAX_ATTEMPTS}: layout still sparse (${Math.round(fillFrac * 100)}% of safe height) after ${MAX_ATTEMPTS} attempts — applied deterministic space-between fill so the content spans the frame`
-          )
-        } else if (sparse) {
-          log.push(
-            `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — layout still sparse after ${MAX_ATTEMPTS} attempts (${Math.round(fillFrac * 100)}% of the safe height) — shipping best output`
           )
         }
         return finalize(outHtml, sanitized, attempt, 'passed', sz, log)
@@ -1725,13 +1693,6 @@ G. AESTHETIC — if the explainer requests a hand-drawn aesthetic, the strokes s
    hand-drawn (some imperfection is fine). Flag completely mechanical / generic appearance
    only if it clearly violates the requested style.
 
-H. SPARSE / UNDERFILLED FRAME — the composition must FILL the frame. FAIL if the content
-   (headline + boxes + lines together) occupies well under two-thirds of the vertical space
-   between the top of the frame and the caption zone, leaving large empty bands above and/or
-   below — a small cluster floating in darkness looks cheap. The issue must instruct:
-   increase font sizes and the vertical gaps between blocks so the composition spans the
-   safe area top to bottom — do NOT add new content.
-
 Respond with ONLY a JSON object, no surrounding prose, no markdown fences:
 
 {
@@ -1930,41 +1891,6 @@ export function injectCalmReveal(html: string, durationSeconds: number): string 
   if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, inject + '\n</body>')
   else out += inject
   return out
-}
-
-/**
- * DETERMINISTIC SPARSE FILL: when repairs cannot make a scene fill the frame
- * (content clustered/centered with empty bands), force the content column to
- * spread top-to-bottom. Descends through single-child wrappers to find the
- * container that actually holds the regions, then sets it to a space-between
- * flex column so the first region hugs the top and the last hugs the bottom.
- * Only ever applied to an already-sparse scene, so it can only help; layout
- * only, so word-reveal animations still play.
- */
-export function injectFillSpread(html: string): string {
-  const inject = `
-<style>#stage{display:flex !important;flex-direction:column !important;justify-content:space-between !important}</style>
-<script>
-  (function () {
-    var stage = document.getElementById('stage') || document.querySelector('.safe') || document.body
-    if (!stage) return
-    var kidsOf = function (el) {
-      return Array.prototype.slice.call(el.children).filter(function (c) {
-        return c.tagName !== 'STYLE' && c.tagName !== 'SCRIPT'
-      })
-    }
-    var target = stage, kids = kidsOf(stage), hops = 0
-    while (kids.length === 1 && hops < 4) { target = kids[0]; kids = kidsOf(target); hops++ }
-    if (kids.length >= 2) {
-      target.style.setProperty('display', 'flex', 'important')
-      target.style.setProperty('flex-direction', 'column', 'important')
-      target.style.setProperty('justify-content', 'space-between', 'important')
-      if (target !== stage) target.style.setProperty('min-height', '82%', 'important')
-    }
-  })()
-</script>`
-  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, inject + '\n</body>')
-  return html + inject
 }
 
 export function sanitizeLoops(html: string): { html: string; sanitized: string[] } {
