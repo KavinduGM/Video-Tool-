@@ -1088,22 +1088,25 @@ const OA_GUIDES_SETS: StorySet[] = [
     assetMode: 'image',
     imageSlots: STD_SLOTS,
     layouts: {
-      // White exam-badge at top; royal-blue italic hook inside the white
-      // scallop shape (baked into the backdrop).
+      // Redesigned frames: the scalloped shapes are now EMPTY decorative
+      // elements at the edges; all text sits on the open blue background (no
+      // longer inside a shape). White exam-badge near the top; italic hook
+      // in the upper-middle, scallop below it (backdrop).
       intro1: {
         padTop: 0,
-        txtTop: 580,
+        txtTop: 430,
         fontPx: 135,
         fontBaseChars: 26,
         textAlign: 'center',
-        badgeTop: 200,
-        badgeFontPx: 58,
+        badgeTop: 210,
+        badgeFontPx: 56,
         badgeAlign: 'center'
       },
-      intro2: { padTop: 0, txtTop: 250, fontPx: 120, fontBaseChars: 28, textAlign: 'center' },
-      // WHITE text over the dark-navy flower shape (per-card ink override).
-      outro1: { padTop: 0, txtTop: 450, fontPx: 120, fontBaseChars: 20, textAlign: 'center', ink: '#FFFFFF' },
-      // Dark-navy CTA text, gray "Subscribed" pill, arrow below it.
+      // Empty scallop at top; text below it on blue.
+      intro2: { padTop: 0, txtTop: 520, fontPx: 118, fontBaseChars: 28, textAlign: 'center' },
+      // White italic text lower-LEFT on blue; navy flower sits top-right (backdrop).
+      outro1: { padTop: 0, txtTop: 900, fontPx: 115, fontBaseChars: 20, textAlign: 'left', ink: '#FFFFFF' },
+      // Navy CTA text on top, gray "Subscribed" pill, arrow below it.
       outro2: {
         padTop: 0,
         txtTop: 120,
@@ -1111,10 +1114,10 @@ const OA_GUIDES_SETS: StorySet[] = [
         fontBaseChars: 42,
         textAlign: 'center',
         ink: '#1B2160',
-        pillTop: 900,
+        pillTop: 800,
         pillFontPx: 44,
-        arrowTop: 1030,
-        arrowH: 300
+        arrowTop: 950,
+        arrowH: 280
       }
     }
   },
