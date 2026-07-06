@@ -1216,6 +1216,57 @@ const OA_GUIDES_SETS: StorySet[] = [
         arrowH: 280
       }
     }
+  },
+  {
+    id: 9,
+    name: 'oaguides-photo',
+    bg: '#F2F1EF',
+    ink: '#111111',
+    font: 'Poppins',
+    weights: '700;800',
+    textWeight: 800,
+    caps: false,
+    italic: false,
+    spaced: false,
+    align: 'center',
+    badge: { bg: '#111111', ink: '#FFFFFF', spaced: false },
+    arrowStyle: 'block',
+    arrowColor: '#111111',
+    pill: 'brand',
+    pillColor: '#D93B0D',
+    assets: { intro1: 'magnifier', intro2: 'key', outro1: 'handshake' },
+    assetMode: 'image',
+    imageSlots: STD_SLOTS,
+    layouts: {
+      // Cut-out road photo fills the LEFT; badge + hook pushed to the right
+      // half via padLeft (both centre within the remaining right column).
+      intro1: {
+        padTop: 0,
+        txtTop: 560,
+        fontPx: 110,
+        fontBaseChars: 22,
+        textAlign: 'center',
+        padLeft: 380,
+        badgeTop: 380,
+        badgeFontPx: 54,
+        badgeAlign: 'center'
+      },
+      // Text top-centre, B&W cut-out photo in the lower backdrop.
+      intro2: { padTop: 0, txtTop: 150, fontPx: 120, fontBaseChars: 22, textAlign: 'center' },
+      outro1: { padTop: 0, txtTop: 150, fontPx: 120, fontBaseChars: 20, textAlign: 'center' },
+      // CTA text on top, red brand pill, arrow below it.
+      outro2: {
+        padTop: 0,
+        txtTop: 100,
+        fontPx: 96,
+        fontBaseChars: 42,
+        textAlign: 'center',
+        pillTop: 840,
+        pillFontPx: 44,
+        arrowTop: 970,
+        arrowH: 300
+      }
+    }
   }
 ]
 
