@@ -149,6 +149,9 @@ export interface CardLayout {
   arrowH?: number
   /** the design text length (chars) fontPx was measured at — longer texts shrink from here (default 30) */
   fontBaseChars?: number
+  /** per-card text colour override (default: the set's ink) — for cards whose
+   *  backdrop needs a different contrast (e.g. white text on a dark shape) */
+  ink?: string
   /** badge chip alignment on intro scene 1 (default left) */
   badgeAlign?: 'left' | 'center'
   /** absolute badge-chip top (px, safe-relative) — for designs where the exam-name
@@ -1060,6 +1063,56 @@ const OA_GUIDES_SETS: StorySet[] = [
         arrowH: 340
       }
     }
+  },
+  {
+    id: 6,
+    name: 'oaguides-serif-blue',
+    bg: '#8FB4E8',
+    ink: '#2C4AA0',
+    font: 'Playfair Display',
+    weights: '600;800',
+    caps: false,
+    italic: true,
+    spaced: false,
+    align: 'center',
+    badge: { bg: '#FFFFFF', ink: '#2C4AA0', spaced: false, italic: true },
+    arrowStyle: 'block',
+    arrowColor: '#1B2160',
+    pill: 'subscribed',
+    pillColor: '#C4C4C4',
+    assets: { intro1: 'key', intro2: 'magnifier', outro1: 'handshake' },
+    assetMode: 'image',
+    imageSlots: STD_SLOTS,
+    layouts: {
+      // White exam-badge at top; royal-blue italic hook inside the white
+      // scallop shape (baked into the backdrop).
+      intro1: {
+        padTop: 0,
+        txtTop: 580,
+        fontPx: 135,
+        fontBaseChars: 26,
+        textAlign: 'center',
+        badgeTop: 200,
+        badgeFontPx: 58,
+        badgeAlign: 'center'
+      },
+      intro2: { padTop: 0, txtTop: 250, fontPx: 120, fontBaseChars: 28, textAlign: 'center' },
+      // WHITE text over the dark-navy flower shape (per-card ink override).
+      outro1: { padTop: 0, txtTop: 450, fontPx: 120, fontBaseChars: 20, textAlign: 'center', ink: '#FFFFFF' },
+      // Dark-navy CTA text, gray "Subscribed" pill, arrow below it.
+      outro2: {
+        padTop: 0,
+        txtTop: 120,
+        fontPx: 96,
+        fontBaseChars: 42,
+        textAlign: 'center',
+        ink: '#1B2160',
+        pillTop: 900,
+        pillFontPx: 44,
+        arrowTop: 1030,
+        arrowH: 300
+      }
+    }
   }
 ]
 
@@ -1733,11 +1786,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   <div class="safe">
     <div class="scene sc1" style="${sceneStyle(card1)}">
       ${badgeHtml}
-      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1, layoutFor(card1).fontBaseChars) : textSizeFor(spec.scene1)}px${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card1), spec.scene1)}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card1).fontPx ? effectiveFontPx(layoutFor(card1).fontPx!, spec.scene1, layoutFor(card1).fontBaseChars) : textSizeFor(spec.scene1)}px${layoutFor(card1).ink ? `;color:${layoutFor(card1).ink}` : ''}${layoutFor(card1).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card1), spec.scene1)}px;left:${layoutFor(card1).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s1.html}</div>
       ${hero1Abs}
     </div>
     <div class="scene sc2" style="${sceneStyle(card2)}">
-      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2, layoutFor(card2).fontBaseChars) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card2), spec.scene2)}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
+      <div class="txt" style="font-size:${layoutFor(card2).fontPx ? effectiveFontPx(layoutFor(card2).fontPx!, spec.scene2, layoutFor(card2).fontBaseChars) : textSizeFor(spec.scene2)}px;margin-top:60px${layoutFor(card2).ink ? `;color:${layoutFor(card2).ink}` : ''}${layoutFor(card2).txtTop !== undefined ? `;position:absolute;top:${clampTxtTop(layoutFor(card2), spec.scene2)}px;left:${layoutFor(card2).padLeft ?? 0}px;right:0;margin-top:0` : ''}">${s2.html}</div>
       ${spec.kind === 'intro' ? hero2Html : ctaHtml}
     </div>
   </div>
