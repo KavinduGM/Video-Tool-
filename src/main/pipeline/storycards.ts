@@ -1182,8 +1182,8 @@ const OA_GUIDES_SETS: StorySet[] = [
     badge: { bg: '#FCD53F', ink: '#111111', spaced: false },
     arrowStyle: 'block',
     arrowColor: '#FFFFFF',
-    pill: 'outline',
-    noPill: true,
+    pill: 'brand',
+    pillColor: '#D93B0D',
     assets: { intro1: 'key', intro2: 'magnifier', outro1: 'handshake' },
     assetMode: 'image',
     imageSlots: STD_SLOTS,
@@ -1210,8 +1210,10 @@ const OA_GUIDES_SETS: StorySet[] = [
         fontPx: 96,
         fontBaseChars: 42,
         textAlign: 'left',
-        arrowTop: 720,
-        arrowH: 240
+        pillTop: 820,
+        pillFontPx: 44,
+        arrowTop: 960,
+        arrowH: 280
       }
     }
   }
