@@ -76,6 +76,10 @@ export interface StorySet {
   hlItalic?: boolean
   /** scene-text font weight (default 900) — for sets whose body copy is lighter */
   textWeight?: number
+  /** hollow/outlined scene text: the stroke colour (fill becomes transparent) */
+  textOutline?: string
+  /** suppress the drawn subscribe pill (design supplies its own CTA visual); the arrow still draws */
+  noPill?: boolean
   /** underline treatment on the intro scene-2 text (set 5 storyboard) */
   underline2?: boolean
   /** code-drawn fallback heroes, used for any slot whose PNG is not uploaded */
@@ -153,7 +157,7 @@ export interface CardLayout {
    *  backdrop needs a different contrast (e.g. white text on a dark shape) */
   ink?: string
   /** badge chip alignment on intro scene 1 (default left) */
-  badgeAlign?: 'left' | 'center'
+  badgeAlign?: 'left' | 'center' | 'right'
   /** absolute badge-chip top (px, safe-relative) — for designs where the exam-name
    *  chip sits away from the scene top (e.g. on a prop). Default: flows above scene-1 text. */
   badgeTop?: number
@@ -1162,6 +1166,54 @@ const OA_GUIDES_SETS: StorySet[] = [
         arrowH: 340
       }
     }
+  },
+  {
+    id: 8,
+    name: 'oaguides-3d',
+    bg: '#000000',
+    ink: '#FFFFFF',
+    textOutline: '#FFFFFF',
+    font: 'Nunito',
+    weights: '800;900',
+    caps: false,
+    italic: false,
+    spaced: false,
+    align: 'left',
+    badge: { bg: '#FCD53F', ink: '#111111', spaced: false },
+    arrowStyle: 'block',
+    arrowColor: '#FFFFFF',
+    pill: 'outline',
+    noPill: true,
+    assets: { intro1: 'key', intro2: 'magnifier', outro1: 'handshake' },
+    assetMode: 'image',
+    imageSlots: STD_SLOTS,
+    layouts: {
+      // Yellow exam-badge top-RIGHT; hollow outlined hook, left-aligned; the
+      // pink 3D character sits in the lower backdrop.
+      intro1: {
+        padTop: 0,
+        txtTop: 200,
+        fontPx: 128,
+        fontBaseChars: 26,
+        textAlign: 'left',
+        badgeTop: 10,
+        badgeFontPx: 60,
+        badgeAlign: 'right'
+      },
+      intro2: { padTop: 0, txtTop: 560, fontPx: 130, fontBaseChars: 16, textAlign: 'left' },
+      outro1: { padTop: 0, txtTop: 120, fontPx: 130, fontBaseChars: 16, textAlign: 'left' },
+      // CTA text on top; NO pill (design uses a bell+check emoji); arrow only,
+      // in the gap above the 3D clapping-hands backdrop.
+      outro2: {
+        padTop: 0,
+        txtTop: 120,
+        fontPx: 96,
+        fontBaseChars: 42,
+        textAlign: 'left',
+        arrowTop: 720,
+        arrowH: 240
+      }
+    }
   }
 ]
 
@@ -1588,10 +1640,11 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
       const bfp = badgeFontPx ?? 34
       const badgeH = Math.round(bfp * 1.2 + (badgeFontPx ? Math.round(bfp * 0.3) * 2 : 24))
       const badgeTopC = Math.max(0, Math.min(badgeTopRaw, 1380 - badgeH))
-      const centered = set.layouts?.intro1?.badgeAlign === 'center'
+      const ba = set.layouts?.intro1?.badgeAlign
+      const jc = ba === 'center' ? 'center' : ba === 'right' ? 'flex-end' : 'flex-start'
       const padL = set.layouts?.intro1?.padLeft ?? 0
       badgeHtml =
-        `<div style="position:absolute;left:0;right:0;top:${badgeTopC}px;display:flex;justify-content:${centered ? 'center' : 'flex-start'};${padL ? `padding-left:${padL}px;` : ''}">` +
+        `<div style="position:absolute;left:0;right:0;top:${badgeTopC}px;display:flex;justify-content:${jc};${padL ? `padding-left:${padL}px;` : ''}${ba === 'right' ? 'padding-right:0;' : ''}">` +
         `<div class="badge" style="${badgeSizeCss}${badgeItalicCss}margin-top:0;animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div></div>`
     } else {
       badgeHtml = `<div class="badge" style="${badgeSizeCss}${badgeAlignCss}animation-delay:${badgeDelay.toFixed(2)}s">${esc(spec.badge)}</div>`
@@ -1731,7 +1784,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const arrowPosCss = arrowTopClamped !== undefined ? `${absCenter}top:${arrowTopClamped}px;` : ''
   const ctaHtml = spec.subscribe
     ? `${ctaImgHtml}
-      <div class="cta-pop" style="${pillPosCss}animation-delay:${pillDelay.toFixed(2)}s">${pillHtml(set, pulseDelay, l2cta.pillFontPx)}</div>
+      ${set.noPill ? '' : `<div class="cta-pop" style="${pillPosCss}animation-delay:${pillDelay.toFixed(2)}s">${pillHtml(set, pulseDelay, l2cta.pillFontPx)}</div>`}
       <div class="arrow-pop" style="${arrowPosCss}animation-delay:${arrowDelay.toFixed(2)}s">
         <div class="bob" style="animation-delay:${bobDelay.toFixed(2)}s">${arrowSvgStyled(set.arrowStyle, set.arrowColor, arrowHeightArg, arrowDelay + 0.1)}</div>
       </div>`
@@ -1758,7 +1811,7 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   .sc2{opacity:0;animation:scIn .35s ease-out both;animation-delay:${tSplit.toFixed(2)}s;animation-iteration-count:1}
   .badge{display:inline-block;white-space:nowrap;background:${set.badge.bg};color:${set.badge.ink};font-weight:800;font-size:34px;${badgeSpacedCss}
          padding:12px 28px;border-radius:14px;margin-top:26px;align-self:flex-start;opacity:0;animation:drop .45s cubic-bezier(.2,.8,.3,1.15) both;animation-iteration-count:1}
-  .txt{color:${set.ink};font-weight:${set.textWeight ?? 900};${capsCss}${italicCss}${spacedCss}line-height:1.16;max-width:100%;
+  .txt{${set.textOutline ? `color:transparent;-webkit-text-stroke:4px ${set.textOutline};` : `color:${set.ink};`}font-weight:${set.textWeight ?? 900};${capsCss}${italicCss}${spacedCss}line-height:1.16;max-width:100%;
        overflow-wrap:normal;word-break:keep-all;margin-top:18px}
   ${underline2Css}
   .w{display:inline-block;opacity:0;animation:wIn .38s cubic-bezier(.2,.7,.3,1) both;animation-iteration-count:1}
