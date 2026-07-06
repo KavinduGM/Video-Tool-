@@ -1011,6 +1011,55 @@ const OA_GUIDES_SETS: StorySet[] = [
         arrowH: 300
       }
     }
+  },
+  {
+    id: 5,
+    name: 'oaguides-foggy',
+    bg: '#E5E1DA',
+    ink: '#111111',
+    font: 'Archivo',
+    weights: '800;900',
+    caps: false,
+    italic: false,
+    spaced: false,
+    align: 'center',
+    badge: { bg: '#5468E8', ink: '#16215E', spaced: false },
+    arrowStyle: 'block',
+    arrowColor: '#111111',
+    pill: 'subscribed',
+    pillColor: '#C4C4C4',
+    assets: { intro1: 'magnifier', intro2: 'key', outro1: 'handshake' },
+    assetMode: 'image',
+    imageSlots: STD_SLOTS,
+    layouts: {
+      // INVERTED: blob character up top (backdrop); blue exam-badge then hook
+      // in the lower half.
+      intro1: {
+        padTop: 0,
+        txtTop: 1010,
+        fontPx: 128,
+        fontBaseChars: 20,
+        textAlign: 'center',
+        badgeTop: 810,
+        badgeFontPx: 60,
+        badgeAlign: 'center'
+      },
+      // Text top, blob bottom (backdrop).
+      intro2: { padTop: 0, txtTop: 120, fontPx: 135, fontBaseChars: 16, textAlign: 'center' },
+      outro1: { padTop: 0, txtTop: 150, fontPx: 130, fontBaseChars: 22, textAlign: 'center' },
+      // CTA text on top, gray "Subscribed" pill, arrow below it.
+      outro2: {
+        padTop: 0,
+        txtTop: 120,
+        fontPx: 96,
+        fontBaseChars: 42,
+        textAlign: 'center',
+        pillTop: 720,
+        pillFontPx: 46,
+        arrowTop: 890,
+        arrowH: 340
+      }
+    }
   }
 ]
 
