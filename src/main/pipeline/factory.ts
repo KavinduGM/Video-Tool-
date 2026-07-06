@@ -280,8 +280,14 @@ export function validateGeneratedScript(yaml: string, expect: FactoryExpectation
   else {
     if (!spec.intro.scene1 || !spec.intro.scene2) errors.push('intro needs BOTH scene1 and scene2')
     // Word-boundary match so short exam names (e.g. "GED") don't false-match
-    // inside ordinary words ("dodged").
-    const examRe = new RegExp(`\\b${expect.examName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    // inside ordinary words ("dodged") — but add a boundary ONLY where the exam
+    // name actually begins/ends with a word char, so names ending in a symbol
+    // ("Security+", "NCLEX (RN)") still match (a trailing \\b can never match
+    // after "+" or ")").
+    const escExam = expect.examName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const preB = /^\w/.test(expect.examName) ? '\\b' : ''
+    const postB = /\w$/.test(expect.examName) ? '\\b' : ''
+    const examRe = new RegExp(`${preB}${escExam}${postB}`, 'i')
     for (const [part, txt] of [['scene1', spec.intro.scene1], ['scene2', spec.intro.scene2]] as const)
       if (txt && examRe.test(txt))
         errors.push(`intro ${part} must NOT contain the exam name — the badge chip above scene1 already shows it; use a pure hook line`)

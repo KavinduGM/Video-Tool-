@@ -1124,7 +1124,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           if (edgeOverflow) reasons.push(safeZoneFeedback(measurement))
           if (overlaps.length > 0) reasons.push(overlapFeedback(overlaps))
           if (empties.length > 0) reasons.push(emptyShapeFeedback(empties))
-          if (sparse)
+          if (sparse && !edgeOverflow)
             reasons.push(
               `LAYOUT TOO SPARSE: the content block spans only ${Math.round(contentH)}px of the ${Math.round(safeH)}px-tall safe area (${Math.round(fillFrac * 100)}% — it must fill at least ${Math.round(MIN_VERTICAL_FILL * 100)}%, aim for ~75%). The frame reads as mostly empty bands above and below a small centered cluster. Keep the SAME text content but SCALE THE COMPOSITION UP: increase every font-size and the vertical gaps between blocks until the first element sits near the top of the safe area and the last near its bottom. Do NOT add new content, do NOT break words across lines, do NOT exceed the safe area.`
             )
@@ -1142,7 +1142,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           }
           if (overlaps.length > 0) bits.push(`${overlaps.length} text-on-outline overlap(s)`)
           if (empties.length > 0) bits.push(`${empties.length} empty shape(s)`)
-          if (sparse) bits.push(`sparse layout (${Math.round(fillFrac * 100)}% of safe height)`)
+          if (sparse && !edgeOverflow) bits.push(`sparse layout (${Math.round(fillFrac * 100)}% of safe height)`)
           log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${bits.join(', ')}) — regenerating with exact feedback`)
           continue
         }

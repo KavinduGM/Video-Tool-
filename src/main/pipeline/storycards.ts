@@ -1738,9 +1738,19 @@ export function buildStoryCardHtml(spec: StoryCardSpec): string {
   const SAFE_W = NINE_SIXTEEN.width - m.left - m.right
   const fitBadgeFont = (raw: number): number => {
     if (!spec.badge) return raw
-    const estW = spec.badge.length * 0.6 * raw + raw // ~0.6em/glyph + 0.5em pad each side
-    const maxW = SAFE_W - 40
-    return estW > maxW ? Math.max(24, Math.floor((raw * maxW) / estW)) : raw
+    const len = spec.badge.length
+    // Spaced badges add letter-spacing AND uppercase (text-transform), both of
+    // which widen the chip — account for both or the fit under-shrinks and the
+    // long exam name still crops on the spaced sets.
+    const spaced = !!set.badge.spaced
+    const glyphEm = spaced ? 0.68 : 0.6 // uppercase glyphs run wider
+    const trackPx = spaced ? 4 : 2 // letter-spacing from badgeSpacedCss
+    const maxW = SAFE_W - 44
+    // rendered width(f) = f*glyphEm*len + f (0.5em padding each side) + len*trackPx.
+    // Solve width(f) <= maxW directly — the tracking term is fixed, so a plain
+    // ratio scale would under-shrink.
+    const maxFont = Math.floor((maxW - len * trackPx) / (glyphEm * len + 1))
+    return Math.max(24, Math.min(raw, maxFont))
   }
   const rawBadgeFontPx = set.layouts?.intro1?.badgeFontPx
   const badgeFontPx = rawBadgeFontPx ? fitBadgeFont(rawBadgeFontPx) : rawBadgeFontPx
