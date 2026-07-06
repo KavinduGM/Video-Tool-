@@ -993,16 +993,17 @@ const OA_GUIDES_SETS: StorySet[] = [
     assetMode: 'image',
     imageSlots: STD_SLOTS,
     layouts: {
-      // Blue exam-badge top-left; long LEFT-aligned hook (blob art baked into
-      // the backdrop). Different alignment per card is fine (per-card textAlign).
+      // Revised frame: the red asterisk moved to the BOTTOM, freeing the top —
+      // blue exam-badge top-left, big LEFT-aligned hook right below it in the
+      // upper area (asterisk baked into the lower backdrop).
       intro1: {
         padTop: 0,
-        txtTop: 400,
-        fontPx: 102,
-        fontBaseChars: 43,
+        txtTop: 260,
+        fontPx: 130,
+        fontBaseChars: 22,
         textAlign: 'left',
         badgeTop: 0,
-        badgeFontPx: 68,
+        badgeFontPx: 72,
         badgeAlign: 'left'
       },
       intro2: { padTop: 0, txtTop: 150, fontPx: 130, fontBaseChars: 16, textAlign: 'center' },
