@@ -4,6 +4,12 @@ import type { AspectRatio, ScriptSpec } from '@shared/types'
 import { dimensionsForRatio } from './parser'
 import { zoneGuideForPrompt, zoneGuideForReviewer, NINE_SIXTEEN } from '@shared/zones'
 import { measureSafeZone, fitHtmlToSafeZone, safeZoneFeedback, overlapFeedback, emptyShapeFeedback } from './safezone'
+import { SAFE_AREA } from '@shared/zones'
+
+// A measured 9:16 scene whose content box spans less than this fraction of the
+// safe-area height reads as sparse/cheap (a small cluster floating in darkness)
+// — the user rejects these frames, so the gate regenerates with scale-up feedback.
+const MIN_VERTICAL_FILL = 0.62
 import { injectShapeAssets, shapeGuideForPrompt } from './shapes'
 import { buildAnimatedCardHtml } from './cards'
 import { buildStoryCardHtml, type StorySet } from './storycards'
@@ -1097,10 +1103,15 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
         const overlaps = measurement.overlaps
         const empties = measurement.emptyShapes
 
-        if (!edgeOverflow && overlaps.length === 0 && empties.length === 0) {
+        const safeH = SAFE_AREA.bottom - SAFE_AREA.top
+        const contentH = measurement.content ? measurement.content.maxY - measurement.content.minY : safeH
+        const fillFrac = contentH / safeH
+        const sparse = fillFrac < MIN_VERTICAL_FILL
+
+        if (!edgeOverflow && overlaps.length === 0 && empties.length === 0 && !sparse) {
           const c = measurement.content!
           log.push(
-            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], no shape overlaps, no empty shapes)`
+            `attempt ${attempt}/${MAX_ATTEMPTS}: safe-zone OK (content x[${Math.round(c.minX)},${Math.round(c.maxX)}] y[${Math.round(c.minY)},${Math.round(c.maxY)}], fills ${Math.round(fillFrac * 100)}% of safe height, no shape overlaps, no empty shapes)`
           )
           return finalize(cleanHtml, sanitized, attempt, 'passed', 'ok', log)
         }
@@ -1111,6 +1122,10 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           if (edgeOverflow) reasons.push(safeZoneFeedback(measurement))
           if (overlaps.length > 0) reasons.push(overlapFeedback(overlaps))
           if (empties.length > 0) reasons.push(emptyShapeFeedback(empties))
+          if (sparse)
+            reasons.push(
+              `LAYOUT TOO SPARSE: the content block spans only ${Math.round(contentH)}px of the ${Math.round(safeH)}px-tall safe area (${Math.round(fillFrac * 100)}% — it must fill at least ${Math.round(MIN_VERTICAL_FILL * 100)}%, aim for ~75%). The frame reads as mostly empty bands above and below a small centered cluster. Keep the SAME text content but SCALE THE COMPOSITION UP: increase every font-size and the vertical gaps between blocks until the first element sits near the top of the safe area and the last near its bottom. Do NOT add new content, do NOT break words across lines, do NOT exceed the safe area.`
+            )
           lastReason = reasons.join('\n\n')
           lastHtml = cleanHtml
           const bits: string[] = []
@@ -1125,6 +1140,7 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
           }
           if (overlaps.length > 0) bits.push(`${overlaps.length} text-on-outline overlap(s)`)
           if (empties.length > 0) bits.push(`${empties.length} empty shape(s)`)
+          if (sparse) bits.push(`sparse layout (${Math.round(fillFrac * 100)}% of safe height)`)
           log.push(`attempt ${attempt}/${MAX_ATTEMPTS}: FAILED safe-zone (${bits.join(', ')}) — regenerating with exact feedback`)
           continue
         }
@@ -1151,6 +1167,11 @@ export async function generateSceneHtml(args: SceneRenderArgs): Promise<SceneHtm
         if (empties.length > 0) {
           log.push(
             `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — ${empties.length} empty shape(s) remain after ${MAX_ATTEMPTS} attempts (a box rendered with no text inside). Consider using plain text instead of a box for this scene.`
+          )
+        }
+        if (sparse) {
+          log.push(
+            `attempt ${attempt}/${MAX_ATTEMPTS}: WARNING — layout still sparse after ${MAX_ATTEMPTS} attempts (content fills ${Math.round(fillFrac * 100)}% of the safe height; target ≥${Math.round(MIN_VERTICAL_FILL * 100)}%) — shipping best output`
           )
         }
         return finalize(outHtml, sanitized, attempt, 'passed', sz, log)
@@ -1684,6 +1705,13 @@ F. COLOR FIDELITY — colors should match the explainer (e.g. "sky blue for DIAG
 G. AESTHETIC — if the explainer requests a hand-drawn aesthetic, the strokes should look
    hand-drawn (some imperfection is fine). Flag completely mechanical / generic appearance
    only if it clearly violates the requested style.
+
+H. SPARSE / UNDERFILLED FRAME — the composition must FILL the frame. FAIL if the content
+   (headline + boxes + lines together) occupies well under two-thirds of the vertical space
+   between the top of the frame and the caption zone, leaving large empty bands above and/or
+   below — a small cluster floating in darkness looks cheap. The issue must instruct:
+   increase font sizes and the vertical gaps between blocks so the composition spans the
+   safe area top to bottom — do NOT add new content.
 
 Respond with ONLY a JSON object, no surrounding prose, no markdown fences:
 
